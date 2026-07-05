@@ -206,9 +206,9 @@ public class TpLockManager {
 
         // 1. Parse server status updates strictly from non-chat game sources
         if (!isChat) {
-            // Auto-detect active party name from list header
-            if (text.contains("===== 组队")) {
-                Matcher m = Pattern.compile("=====\\s*组队\\s*(?<partyName>[^\\s=]+)\\s*=====").matcher(text);
+            // Actual format: ===== 队伍 [party1] (17/50) =====
+            if (text.contains("===== 队伍") || text.contains("===== 组队")) {
+                Matcher m = Pattern.compile("=====\\s*(?:队伍|组队)\\s*\\[(?<partyName>[^\\]]+)\\]").matcher(text);
                 if (m.find()) {
                     String partyName = m.group("partyName");
                     if (partyName != null && !partyName.trim().isEmpty()) {
@@ -224,8 +224,8 @@ public class TpLockManager {
             }
 
             // Scrape join status announcements
-            if (text.contains("加入了队伍!")) {
-                Matcher m = Pattern.compile("(?<player>\\w+)\\s+加入了队伍!").matcher(text);
+            if (text.contains("加入了队伍")) {
+                Matcher m = Pattern.compile("(?<player>\\w+)\\s+加入了队伍").matcher(text);
                 if (m.find()) {
                     String player = m.group("player");
                     if (player != null && !player.trim().isEmpty()) {
@@ -235,8 +235,8 @@ public class TpLockManager {
             }
 
             // Scrape leave/kick announcements
-            if (text.contains("移出队伍") || text.contains("离开队伍") || text.contains("退出队伍")) {
-                Matcher m = Pattern.compile("(?<player>\\w+)\\s+(?:被移出队伍|离开了队伍|退出了队伍)。").matcher(text);
+            if (text.contains("退出了队伍") || text.contains("离开了队伍") || text.contains("被移出队伍") || text.contains("被踢出队伍")) {
+                Matcher m = Pattern.compile("(?<player>\\w+)\\s+(?:退出了队伍|离开了队伍|被移出了?队伍|被踢出了?队伍)[。！!]?").matcher(text);
                 if (m.find()) {
                     String player = m.group("player");
                     if (player != null && !player.trim().isEmpty()) {
@@ -246,7 +246,7 @@ public class TpLockManager {
             }
 
             // Detect if player themselves leaves or party is disbanded/kicked
-            boolean isSelfLeave = text.contains("你离开了队伍") || text.contains("你已离开了队伍") || text.contains("你被移出了队伍") || text.contains("你被踢出了队伍") || (text.contains("被移出队伍") && text.contains("你"));
+            boolean isSelfLeave = text.contains("你离开了队伍") || text.contains("你已离开了队伍") || text.contains("你被移出") || text.contains("你被踢出");
             boolean isDisband = text.contains("解散了队伍") || text.contains("队伍已解散") || text.contains("队伍解散");
             if (isSelfLeave || isDisband) {
                 setActivePartyName(null);
@@ -259,34 +259,52 @@ public class TpLockManager {
                 }
             }
 
-            // Scrape list output
-            if (text.startsWith("队长：") || text.startsWith("队长:")) {
-                String leader = text.substring(3).trim();
-                if (!leader.isEmpty()) {
-                    scrapedParty.add(leader);
+            // Scrape /party list output
+            // Actual formats from server:
+            //   ★队长 badpig1234 [在线]
+            //   ★副队长 someone [离线]
+            //   (indented with spaces)   David_Li [在线]
+            // Also old-style fallback:
+            //   队长：name  or  队员：name
+            boolean isLeaderLine = text.trim().startsWith("★队长") || text.trim().startsWith("★副队长") || text.startsWith("队长：") || text.startsWith("队长:");
+            boolean isMemberLine = !isLeaderLine && text.matches("^\\s{2,}(\\w+)\\s+\\[(?:在线|离线)\\]\\s*$")
+                || text.startsWith("队员：") || text.startsWith("队员:");
+
+            if (isLeaderLine) {
+                Matcher m = Pattern.compile("(?:★队长|★副队长|队长[：:])\\s*(?<player>\\w+)").matcher(text);
+                if (m.find()) {
+                    String player = m.group("player");
+                    if (player != null && !player.trim().isEmpty()) {
+                        scrapedParty.add(player.trim());
+                    }
                 }
-            }
-            if (text.startsWith("队员：") || text.startsWith("队员:")) {
-                String membersStr = text.substring(3).trim();
-                String[] members = membersStr.split("[,，\\s]+");
-                for (String member : members) {
-                    if (!member.trim().isEmpty()) {
-                        scrapedParty.add(member.trim());
+            } else if (isMemberLine) {
+                // Indented member line: "  David_Li [在线]" or "队员：name1, name2"
+                if (text.startsWith("队员：") || text.startsWith("队员:")) {
+                    String membersStr = text.substring(3).trim();
+                    for (String member : membersStr.split("[,，\\s]+")) {
+                        if (!member.trim().isEmpty()) scrapedParty.add(member.trim());
+                    }
+                } else {
+                    Matcher m = Pattern.compile("^\\s+((?<player>\\w+))\\s+\\[(?:在线|离线)\\]").matcher(text);
+                    if (m.find()) {
+                        String player = m.group("player");
+                        if (player != null && !player.trim().isEmpty()) {
+                            scrapedParty.add(player.trim());
+                        }
                     }
                 }
             }
 
             // Intercept and hide auto party query list output
             if (autoPartyQueryActive) {
-                boolean isHeader = text.contains("===== 组队");
-                boolean isLeader = text.startsWith("队长：") || text.startsWith("队长:");
-                boolean isMember = text.startsWith("队员：") || text.startsWith("队员:");
-                boolean isHelpLine = text.contains("/party ") || text.contains("/pc ");
-                if (isHeader || isLeader || isMember || isHelpLine) {
-                    if (text.contains("/party wp") && text.contains("/wp")) {
-                        autoPartyQueryActive = false; // Last help line
-                    }
+                boolean isHeader = text.contains("===== 队伍") || text.contains("===== 组队");
+                if (isHeader || isLeaderLine || isMemberLine) {
                     return true; // Drop line from chat hud
+                }
+                // Safety: also suppress lines that look like /party command help text
+                if (text.contains("/party ") || text.contains("/pc ")) {
+                    return true;
                 }
             }
         }
