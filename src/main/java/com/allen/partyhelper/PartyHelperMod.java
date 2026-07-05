@@ -22,9 +22,40 @@ public class PartyHelperMod implements ClientModInitializer {
             PartyHelperManager.onJoinWorld();
         });
 
-        // Block outgoing commands
+        // Block outgoing commands and handle /global chat override
         ClientSendMessageEvents.ALLOW_COMMAND.register(command -> {
+            if (PartyHelperManager.getForcePartyChat()) {
+                String cmdTrim = command.trim();
+                if (cmdTrim.startsWith("global ") || cmdTrim.equals("global")) {
+                    net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
+                    if (client != null && client.getNetworkHandler() != null) {
+                        String message = cmdTrim.length() > 7 ? cmdTrim.substring(7).trim() : "";
+                        if (!message.isEmpty()) {
+                            client.getNetworkHandler().sendChatMessage(message);
+                        } else {
+                            if (client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                                client.inGameHud.getChatHud().addMessage(
+                                    Text.literal("§c[PartyHelper] Usage: /global <message> to send a server-wide chat message.")
+                                );
+                            }
+                        }
+                    }
+                    return false; // Suppress command execution
+                }
+            }
             return !PartyHelperManager.handleOutgoingCommand(command);
+        });
+
+        // Force routing normal chat messages to party chat (/pc)
+        ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
+            if (PartyHelperManager.getForcePartyChat()) {
+                net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
+                if (client != null && client.getNetworkHandler() != null) {
+                    client.getNetworkHandler().sendChatMessage("/pc " + message);
+                }
+                return false; // Suppress original chat message
+            }
+            return true;
         });
 
         // Log and filter incoming game (system) messages
@@ -247,6 +278,29 @@ public class PartyHelperMod implements ClientModInitializer {
                                     PartyHelperManager.setLogAutoAccept(false);
                                     context.getSource().sendFeedback(Text.literal(
                                         "§a[PartyHelper] log-autoaccept = §ffalse §7— chat notifications on auto-accept disabled."
+                                    ));
+                                    return 1;
+                                })
+                            )
+                        )
+                    )
+                    // force-party-chat
+                    .then(ClientCommandManager.literal("force-party-chat")
+                        .then(ClientCommandManager.literal("set")
+                            .then(ClientCommandManager.literal("true")
+                                .executes(context -> {
+                                    PartyHelperManager.setForcePartyChat(true);
+                                    context.getSource().sendFeedback(Text.literal(
+                                        "§a[PartyHelper] force-party-chat = §ftrue §7— normal chat messages will be routed to /pc."
+                                    ));
+                                    return 1;
+                                })
+                            )
+                            .then(ClientCommandManager.literal("false")
+                                .executes(context -> {
+                                    PartyHelperManager.setForcePartyChat(false);
+                                    context.getSource().sendFeedback(Text.literal(
+                                        "§a[PartyHelper] force-party-chat = §ffalse §7— normal chat messages sent publicly."
                                     ));
                                     return 1;
                                 })

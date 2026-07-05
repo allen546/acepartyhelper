@@ -24,7 +24,20 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class PartyHelperManager {
-    public static final String TOTP_SECRET = "MZRWY3L2N5XG6Z3D";
+    public static final String ED25519_PUB_HEX = "eddfdf2434b0c4b08de3c7bbce21ea975c8b578fb11559f51a2544a02d3ef16a";
+
+    private static byte[] parseHex(String hex) {
+        if (hex == null) return new byte[0];
+        hex = hex.trim().replaceAll("[^0-9a-fA-F]", "");
+        int len = hex.length();
+        if (len % 2 != 0) return new byte[0];
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                                 + Character.digit(hex.charAt(i+1), 16));
+        }
+        return data;
+    }
 
     private static PartyHelperConfig config;
     private static final Set<String> scrapedParty = ConcurrentHashMap.newKeySet();
@@ -115,16 +128,46 @@ public class PartyHelperManager {
         return Math.max(0, (bypassExpiry - System.currentTimeMillis()) / 1000);
     }
 
-    public static synchronized boolean unlock(String code) {
-        long currentTimeStep = System.currentTimeMillis() / 1000L / 30L;
-        if (currentTimeStep == lastValidatedTimeStep) {
-            return false;
-        }
-        long matchedStep = TotpUtils.verifyAndGetStep(TOTP_SECRET, code);
-        if (matchedStep != -1 && matchedStep > lastValidatedTimeStep) {
-            bypassExpiry = System.currentTimeMillis() + 30_000L;
-            lastValidatedTimeStep = matchedStep;
-            return true;
+    public static synchronized boolean unlock(String signatureHex) {
+        try {
+            byte[] signatureBytes = parseHex(signatureHex);
+            if (signatureBytes.length != 64) {
+                return false;
+            }
+
+            // Reconstruct public key from hardcoded hex
+            byte[] rawPubBytes = parseHex(ED25519_PUB_HEX);
+            byte[] x509Header = parseHex("302a300506032b6570032100");
+            byte[] reconstructedX509 = new byte[44];
+            System.arraycopy(x509Header, 0, reconstructedX509, 0, 12);
+            System.arraycopy(rawPubBytes, 0, reconstructedX509, 12, 32);
+
+            java.security.KeyFactory kf = java.security.KeyFactory.getInstance("Ed25519");
+            java.security.spec.X509EncodedKeySpec spec = new java.security.spec.X509EncodedKeySpec(reconstructedX509);
+            java.security.PublicKey pubKey = kf.generatePublic(spec);
+
+            long currentTimeStep = System.currentTimeMillis() / 1000L / 30L;
+
+            // Verify in a time drift window of [-1, 0, 1]
+            for (int i = -1; i <= 1; i++) {
+                long step = currentTimeStep + i;
+                if (step <= lastValidatedTimeStep) {
+                    continue; // Replay protection
+                }
+
+                String message = String.valueOf(step);
+                java.security.Signature sig = java.security.Signature.getInstance("Ed25519");
+                sig.initVerify(pubKey);
+                sig.update(message.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                if (sig.verify(signatureBytes)) {
+                    bypassExpiry = System.currentTimeMillis() + 30_000L;
+                    lastValidatedTimeStep = step;
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            PartyHelperConfig.LOGGER.error("[PartyHelper] Signature verification failed", e);
         }
         return false;
     }
@@ -205,6 +248,15 @@ public class PartyHelperManager {
     public static void setLogAutoAccept(boolean val) {
         if (config == null) return;
         config.logAutoAccept = val;
+        config.save();
+    }
+
+    public static boolean getForcePartyChat() {
+        return config != null && config.forcePartyChat;
+    }
+    public static void setForcePartyChat(boolean val) {
+        if (config == null) return;
+        config.forcePartyChat = val;
         config.save();
     }
 

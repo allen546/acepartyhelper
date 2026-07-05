@@ -33,6 +33,8 @@ public class PartyHelperConfig {
     public boolean blockWhenNoParty = true;
     /** Log client-side warning/feedback chat message when autoaccepting. Default true. */
     public boolean logAutoAccept = true;
+    /** Automatically prefix plain chat messages with /pc and support /global. Default true. */
+    public boolean forcePartyChat = true;
 
     private static File getConfigFile() {
         if (configFile == null) {
