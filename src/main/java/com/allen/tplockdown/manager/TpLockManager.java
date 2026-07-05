@@ -400,7 +400,7 @@ public class TpLockManager {
         boolean isTpCmd = baseCmd.equals("tpa") || baseCmd.equals("tpahere");
         boolean isAcceptOrDenyCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes") || baseCmd.equals("tpdeny") || baseCmd.equals("tpno");
         boolean isAutoAcceptToggleCmd = baseCmd.equals("tpatoggle") || baseCmd.equals("tpauto");
-        boolean isTpHereNowCmd = baseCmd.equals("tpaherenow") || baseCmd.equals("tpahereall");
+        boolean isTpHereNowCmd = baseCmd.equals("tpahereall");
         boolean isBlockOrIgnoreCmd = baseCmd.equals("tpablock") || baseCmd.equals("tpaignore");
         boolean isLeaveCmd = baseCmd.equals("party") && parts.length >= 2 && parts[1].equals("leave");
         boolean isInviteCmd = baseCmd.equals("party") && parts.length >= 2 && parts[1].equals("invite");
