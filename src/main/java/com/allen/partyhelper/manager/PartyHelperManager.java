@@ -24,7 +24,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class PartyHelperManager {
-    public static final String ED25519_PUB_HEX = "eddfdf2434b0c4b08de3c7bbce21ea975c8b578fb11559f51a2544a02d3ef16a";
+    // HARDCODED ED25519 PUBLIC KEY (Hex format, 32 bytes)
+    public static final String ED25519_PUB_HEX = "641b9f5b90a84ae7c6382d6b1803f3bdc2ddc99b44d3fcc0a61b4a0029210680";
 
     private static byte[] parseHex(String hex) {
         if (hex == null) return new byte[0];

@@ -23,14 +23,31 @@ def main():
     current_step = str(int(time.time()) // 30)
     
     # Load private key
-    try:
-        private_key = serialization.load_pem_private_key(
-            DEFAULT_PRIV_PEM.encode("utf-8"),
-            password=None
-        )
-    except Exception as e:
-        print(f"Error loading private key: {e}")
-        sys.exit(1)
+    private_key = None
+    import os
+    pem_path = os.path.join(os.path.dirname(__file__), "private_key.pem")
+    if os.path.exists(pem_path):
+        try:
+            with open(pem_path, "r", encoding="utf-8") as f:
+                pem_data = f.read()
+            private_key = serialization.load_pem_private_key(
+                pem_data.encode("utf-8"),
+                password=None
+            )
+            print("🔑 Loaded production private key from private_key.pem")
+        except Exception as e:
+            print(f"Warning: Failed to load private_key.pem: {e}. Falling back to dummy key.")
+            
+    if private_key is None:
+        try:
+            private_key = serialization.load_pem_private_key(
+                DEFAULT_PRIV_PEM.encode("utf-8"),
+                password=None
+            )
+            print("ℹ️ Loaded default dummy private key")
+        except Exception as e:
+            print(f"Error loading fallback private key: {e}")
+            sys.exit(1)
 
     # Sign the step
     msg_bytes = current_step.encode("utf-8")
