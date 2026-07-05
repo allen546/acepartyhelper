@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#     "cryptography",
+#     "pyperclip",
+# ]
+# ///
+
 import time
 import sys
+import pyperclip
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization
 
 # Default dummy private key matching the public key hardcoded in the Java client
 DEFAULT_PRIV_PEM = """-----BEGIN PRIVATE KEY-----
@@ -8,13 +19,6 @@ MC4CAQAwBQYDK2VwBCIEICZsF/kFZVoCRSf5Y/2Qzp6tWKodfVszUeMRoQaTi0l0
 -----END PRIVATE KEY-----"""
 
 def main():
-    try:
-        from cryptography.hazmat.primitives.asymmetric import ed25519
-        from cryptography.hazmat.primitives import serialization
-    except ImportError:
-        print("Error: The 'cryptography' library is required. Install it using 'pip install cryptography'.")
-        sys.exit(1)
-
     # Calculate current 30-second step
     current_step = str(int(time.time()) // 30)
     
@@ -33,10 +37,24 @@ def main():
     signature = private_key.sign(msg_bytes)
     sig_hex = signature.hex()
 
+    cmd = f"/ph unlock {sig_hex}"
+    
+    # Copy to clipboard
+    try:
+        pyperclip.copy(cmd)
+        copied = True
+    except Exception as e:
+        print(f"Warning: Could not copy to clipboard: {e}")
+        copied = False
+
     print(f"Message (Time-Step): {current_step}")
-    print(f"Signature (Hex):\n{sig_hex}")
-    print("\nCopy the signature above and run this command in Minecraft:")
-    print(f"/ph unlock {sig_hex}")
+    print(f"Signature (Hex):\n{sig_hex}\n")
+    print(f"Command:\n{cmd}\n")
+    
+    if copied:
+        print("⚡ The command has been copied to your clipboard! Paste it directly in Minecraft (Ctrl+V or Cmd+V).")
+    else:
+        print("Copy the command above and run it in Minecraft.")
 
 if __name__ == "__main__":
     main()
