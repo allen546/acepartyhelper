@@ -25,6 +25,8 @@ public class TpLockManager {
     // HARDCODED TOTP SECRET ON COMPILE (Base32 format, e.g. "I65VU7K5ZQL7S62D")
     public static final String TOTP_SECRET = "I65VU7K5ZQL7S62D";
 
+    private TpLockManager() {}
+
     private static ModConfig config;
     private static final Set<String> scrapedParty = ConcurrentHashMap.newKeySet();
     private static volatile String latestRequester = null;
@@ -115,8 +117,8 @@ public class TpLockManager {
         }
         String name = player.trim().toLowerCase();
         return isBypassActive() || 
-               config.manualParty.stream().anyMatch(p -> p.equalsIgnoreCase(name)) || 
-               scrapedParty.stream().anyMatch(p -> p.equalsIgnoreCase(name));
+               config.manualParty.stream().filter(p -> p != null).anyMatch(p -> p.equalsIgnoreCase(name)) || 
+               scrapedParty.stream().filter(p -> p != null).anyMatch(p -> p.equalsIgnoreCase(name));
     }
 
     public static synchronized void addManualPartyMember(String player) {
@@ -133,7 +135,7 @@ public class TpLockManager {
         if (config.manualParty == null) {
             config.manualParty = new HashSet<>();
         }
-        config.manualParty.removeIf(p -> p.equalsIgnoreCase(player.trim()));
+        config.manualParty.removeIf(p -> p == null || p.equalsIgnoreCase(player.trim()));
         config.save();
     }
 
@@ -165,6 +167,7 @@ public class TpLockManager {
     }
 
     public static boolean handleIncomingMessage(Text message) {
+        if (message == null) return false;
         String text = message.getString();
 
         // 1. Scrape party chat for members automatically
