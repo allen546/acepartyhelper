@@ -39,6 +39,8 @@ public class PartyHelperConfig {
     public boolean autoAcceptTpa = false;
     /** Auto-accept TPAHERE requests. Default false. */
     public boolean autoAcceptTpaHere = false;
+    /** Disable auto-accept if solo (no party) or unlocked (bypass active). Default true. */
+    public boolean autoAcceptRequiresLockedParty = true;
 
     private static File getConfigFile() {
         if (configFile == null) {

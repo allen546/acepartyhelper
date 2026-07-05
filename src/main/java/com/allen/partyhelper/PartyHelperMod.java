@@ -132,7 +132,8 @@ public class PartyHelperMod implements ClientModInitializer {
                             "§7Auto-Accept TPAHERE: " + (PartyHelperManager.isAutoAcceptTpaHere() ? "§aON" : "§cOFF") + "\n" +
                             "§7Reject Method: §f" + PartyHelperManager.getRejectMethod() + "\n" +
                             "§7Block When Solo: " + (PartyHelperManager.getBlockWhenNoParty() ? "§aYES" : "§cNO") + "\n" +
-                            "§7Log Auto-Accept: " + (PartyHelperManager.getLogAutoAccept() ? "§aYES" : "§cNO")
+                            "§7Log Auto-Accept: " + (PartyHelperManager.getLogAutoAccept() ? "§aYES" : "§cNO") + "\n" +
+                            "§7Auto-Accept Requires Locked Party: " + (PartyHelperManager.getAutoAcceptRequiresLockedParty() ? "§aYES" : "§cNO")
                         ));
                         return 1;
                     })
@@ -287,6 +288,29 @@ public class PartyHelperMod implements ClientModInitializer {
                                     PartyHelperManager.setForcePartyChat(false);
                                     context.getSource().sendFeedback(Text.literal(
                                         "§a[PartyHelper] force-party-chat = §ffalse §7— normal chat messages sent publicly."
+                                    ));
+                                    return 1;
+                                })
+                            )
+                        )
+                    )
+                    // auto-accept-requires-locked-party
+                    .then(ClientCommandManager.literal("auto-accept-requires-locked-party")
+                        .then(ClientCommandManager.literal("set")
+                            .then(ClientCommandManager.literal("true")
+                                .executes(context -> {
+                                    PartyHelperManager.setAutoAcceptRequiresLockedParty(true);
+                                    context.getSource().sendFeedback(Text.literal(
+                                        "§a[PartyHelper] auto-accept-requires-locked-party = §ftrue §7— auto-accept disabled when solo or unlocked."
+                                    ));
+                                    return 1;
+                                })
+                            )
+                            .then(ClientCommandManager.literal("false")
+                                .executes(context -> {
+                                    PartyHelperManager.setAutoAcceptRequiresLockedParty(false);
+                                    context.getSource().sendFeedback(Text.literal(
+                                        "§a[PartyHelper] auto-accept-requires-locked-party = §ffalse §7— auto-accept triggers whenever allowed."
                                     ));
                                     return 1;
                                 })

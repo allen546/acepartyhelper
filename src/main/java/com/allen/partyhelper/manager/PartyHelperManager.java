@@ -276,6 +276,15 @@ public class PartyHelperManager {
         config.save();
     }
 
+    public static boolean getAutoAcceptRequiresLockedParty() {
+        return config != null && config.autoAcceptRequiresLockedParty;
+    }
+    public static void setAutoAcceptRequiresLockedParty(boolean val) {
+        if (config == null) return;
+        config.autoAcceptRequiresLockedParty = val;
+        config.save();
+    }
+
     public static void onJoinWorld() {
         latestRequestBlocked = false;
         pendingAutoAccept = false;
@@ -462,7 +471,9 @@ public class PartyHelperManager {
             lastRequestBringsThemToMe = isTpaType; // TPA brings them to me; TPAHERE does not
             
             boolean allowed = isPlayerAllowed(matchedRequester);
-            boolean shouldAutoAccept = allowed && (isTpaType ? isAutoAcceptTpa() : isAutoAcceptTpaHere());
+            boolean isSoloOrUnlocked = (config == null || config.activePartyName == null || config.activePartyName.trim().isEmpty()) || isBypassActive();
+            boolean autoAcceptPrevented = getAutoAcceptRequiresLockedParty() && isSoloOrUnlocked;
+            boolean shouldAutoAccept = allowed && !autoAcceptPrevented && (isTpaType ? isAutoAcceptTpa() : isAutoAcceptTpaHere());
             PartyHelperConfig.LOGGER.info("[PartyHelper] TP request ({}) from '{}' | allowed={} | autoAccept={} | party={} | scraped={}",
                 isTpaType ? "tpa" : "tpahere", matchedRequester, allowed,
                 shouldAutoAccept, config != null ? config.activePartyName : "null", scrapedParty);
