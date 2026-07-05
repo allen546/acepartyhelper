@@ -5,27 +5,26 @@ import com.allen.tplockdown.util.TotpUtils;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
+
+import java.io.File;
 import java.io.FileWriter;
 import java.io.PrintWriter;
-import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Set;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.nio.charset.StandardCharsets;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class TpLockManager {
-    // HARDCODED TOTP SECRET ON COMPILE (Base32 format, e.g. "I65VU7K5ZQL7S62D")
     public static final String TOTP_SECRET = "I65VU7K5ZQL7S62D";
-
-    private TpLockManager() {}
 
     private static ModConfig config;
     private static final Set<String> scrapedParty = ConcurrentHashMap.newKeySet();
@@ -34,14 +33,20 @@ public class TpLockManager {
     private static volatile long lastValidatedTimeStep = 0L;
     private static File logFile;
 
+    private static volatile Pattern partyChatPatternCompiled = null;
+    private static volatile List<Pattern> incomingRequestPatternsCompiled = new ArrayList<>();
+
+    private static volatile boolean latestRequestBlocked = false;
+    private static volatile boolean autoPartyQueryActive = false;
+    private static volatile String latestSentPartyMessage = null;
+
     private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "TpLockdown-Log-Thread");
         t.setDaemon(true);
         return t;
     });
 
-    private static volatile Pattern partyChatPatternCompiled = null;
-    private static volatile List<Pattern> incomingRequestPatternsCompiled = new java.util.ArrayList<>();
+    private TpLockManager() {}
 
     public static void init() {
         config = ModConfig.load();
@@ -49,45 +54,43 @@ public class TpLockManager {
         compilePatterns();
     }
 
-    public static synchronized void reloadConfig() {
-        config = ModConfig.load();
-        compilePatterns();
-    }
-
     public static synchronized void compilePatterns() {
-        Pattern newPartyChatPattern = null;
-        if (config != null && config.partyChatPattern != null && !config.partyChatPattern.isEmpty()) {
-            try {
-                newPartyChatPattern = Pattern.compile(config.partyChatPattern);
-            } catch (Exception e) {
-                ModConfig.LOGGER.error("Failed to compile party chat pattern: " + config.partyChatPattern, e);
+        if (config == null) return;
+        try {
+            String activeParty = config.activePartyName;
+            if (activeParty == null || activeParty.trim().isEmpty()) {
+                partyChatPatternCompiled = null;
+            } else {
+                String escapedParty = Pattern.quote(activeParty.trim());
+                String regex = "^\\s*\\[" + escapedParty + "\\]\\s*(?:\\[[^\\]]+\\]\\s*)?(?<player>\\w+)";
+                partyChatPatternCompiled = Pattern.compile(regex);
             }
+        } catch (Exception e) {
+            ModConfig.LOGGER.error("[TpLockdown] Failed to compile partyChatPattern", e);
         }
-        partyChatPatternCompiled = newPartyChatPattern;
 
-        List<Pattern> newIncomingRequestPatterns = new java.util.ArrayList<>();
-        if (config != null && config.incomingRequestPatterns != null) {
+        List<Pattern> compiled = new ArrayList<>();
+        if (config.incomingRequestPatterns != null) {
             for (String patternStr : config.incomingRequestPatterns) {
                 try {
-                    Pattern p = Pattern.compile(patternStr, Pattern.CASE_INSENSITIVE);
-                    newIncomingRequestPatterns.add(p);
+                    compiled.add(Pattern.compile(patternStr, Pattern.CASE_INSENSITIVE));
                 } catch (Exception e) {
-                    ModConfig.LOGGER.error("Failed to compile incoming request pattern: " + patternStr, e);
+                    ModConfig.LOGGER.error("[TpLockdown] Failed to compile incoming request pattern: " + patternStr, e);
                 }
             }
         }
-        incomingRequestPatternsCompiled = newIncomingRequestPatterns;
+        incomingRequestPatternsCompiled = compiled;
     }
 
     public static void logIncomingMessage(String type, String content) {
-        if (logFile == null) return;
         logExecutor.submit(() -> {
+            if (logFile == null) return;
             try (FileWriter fw = new FileWriter(logFile, StandardCharsets.UTF_8, true);
                  PrintWriter pw = new PrintWriter(fw)) {
                 String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                 pw.println("[" + timestamp + "] [" + type + "] " + content);
             } catch (IOException e) {
-                ModConfig.LOGGER.error("Failed to write to chat log file", e);
+                ModConfig.LOGGER.error("[TpLockdown] Failed to write to chat log file", e);
             }
         });
     }
@@ -101,6 +104,10 @@ public class TpLockManager {
     }
 
     public static synchronized boolean unlock(String code) {
+        long currentTimeStep = System.currentTimeMillis() / 1000L / 30L;
+        if (currentTimeStep == lastValidatedTimeStep) {
+            return false;
+        }
         long matchedStep = TotpUtils.verifyAndGetStep(TOTP_SECRET, code);
         if (matchedStep != -1 && matchedStep > lastValidatedTimeStep) {
             bypassExpiry = System.currentTimeMillis() + 30_000L;
@@ -112,50 +119,30 @@ public class TpLockManager {
 
     public static synchronized boolean isPlayerAllowed(String player) {
         if (player == null || config == null) return false;
-        if (config.manualParty == null) {
-            config.manualParty = new HashSet<>();
+        // If not in a party, mod is effectively disabled (always allow)
+        if (config.activePartyName == null || config.activePartyName.trim().isEmpty()) {
+            return true;
         }
+        if (isBypassActive()) return true;
         String name = player.trim().toLowerCase();
-        return isBypassActive() || 
-               config.manualParty.stream().filter(p -> p != null).anyMatch(p -> p.equalsIgnoreCase(name)) || 
-               scrapedParty.stream().filter(p -> p != null).anyMatch(p -> p.equalsIgnoreCase(name));
+        return scrapedParty.stream().filter(p -> p != null).anyMatch(p -> p.equalsIgnoreCase(name));
     }
 
-    public static synchronized void addManualPartyMember(String player) {
-        if (player == null || config == null) return;
-        if (config.manualParty == null) {
-            config.manualParty = new HashSet<>();
-        }
-        config.manualParty.add(player.trim());
-        config.save();
+    public static synchronized boolean isPlayerInParty(String player) {
+        if (player == null) return false;
+        String name = player.trim().toLowerCase();
+        return scrapedParty.stream().filter(p -> p != null).anyMatch(p -> p.equalsIgnoreCase(name));
     }
 
-    public static synchronized void removeManualPartyMember(String player) {
-        if (player == null || config == null) return;
-        if (config.manualParty == null) {
-            config.manualParty = new HashSet<>();
-        }
-        config.manualParty.removeIf(p -> p == null || p.equalsIgnoreCase(player.trim()));
-        config.save();
+    public static synchronized String getActivePartyName() {
+        return config != null ? config.activePartyName : null;
     }
 
-    public static synchronized void clearManualParty() {
+    public static synchronized void setActivePartyName(String name) {
         if (config == null) return;
-        if (config.manualParty == null) {
-            config.manualParty = new HashSet<>();
-        }
-        config.manualParty.clear();
+        config.activePartyName = name != null ? name.trim() : null;
         config.save();
-    }
-
-    public static synchronized Set<String> getManualParty() {
-        if (config == null) {
-            return new HashSet<>();
-        }
-        if (config.manualParty == null) {
-            config.manualParty = new HashSet<>();
-        }
-        return new HashSet<>(config.manualParty);
+        compilePatterns();
     }
 
     public static Set<String> getScrapedParty() {
@@ -166,11 +153,118 @@ public class TpLockManager {
         scrapedParty.clear();
     }
 
-    public static boolean handleIncomingMessage(Text message) {
+    public static void onJoinWorld() {
+        scrapedParty.clear();
+        latestRequestBlocked = false;
+        latestSentPartyMessage = null;
+        setActivePartyName(null);
+
+        Thread t = new Thread(() -> {
+            try {
+                Thread.sleep(5000);
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null) {
+                    client.execute(() -> {
+                        if (client.getNetworkHandler() != null && client.player != null) {
+                            autoPartyQueryActive = true;
+                            client.getNetworkHandler().sendChatCommand("party list");
+                        }
+                    });
+                }
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+        }, "TpLockdown-AutoPartyQuery");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    public static void refreshParty() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client != null && client.getNetworkHandler() != null) {
+            autoPartyQueryActive = true;
+            client.getNetworkHandler().sendChatCommand("party list");
+        }
+    }
+
+    public static boolean handleIncomingMessage(Text message, boolean isChat) {
         if (message == null) return false;
         String text = message.getString();
 
-        // 1. Scrape party chat for members automatically
+        // 1. Parse server status updates strictly from non-chat game sources
+        if (!isChat) {
+            // Auto-detect active party name from list header
+            if (text.contains("===== 组队")) {
+                Matcher m = Pattern.compile("=====\\s*组队\\s*(?<partyName>[^\\s=]+)\\s*=====").matcher(text);
+                if (m.find()) {
+                    String partyName = m.group("partyName");
+                    if (partyName != null && !partyName.trim().isEmpty()) {
+                        setActivePartyName(partyName.trim());
+                        MinecraftClient client = MinecraftClient.getInstance();
+                        if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                            client.inGameHud.getChatHud().addMessage(
+                                Text.literal("§a[TP-Lock] Detected active party: §e" + partyName.trim())
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Scrape join status announcements
+            if (text.contains("加入了队伍!")) {
+                Matcher m = Pattern.compile("(?<player>\\w+)\\s+加入了队伍!").matcher(text);
+                if (m.find()) {
+                    String player = m.group("player");
+                    if (player != null && !player.trim().isEmpty()) {
+                        scrapedParty.add(player.trim());
+                    }
+                }
+            }
+
+            // Scrape leave/kick announcements
+            if (text.contains("移出队伍") || text.contains("离开队伍") || text.contains("退出队伍")) {
+                Matcher m = Pattern.compile("(?<player>\\w+)\\s+(?:被移出队伍|离开了队伍|退出了队伍)。").matcher(text);
+                if (m.find()) {
+                    String player = m.group("player");
+                    if (player != null && !player.trim().isEmpty()) {
+                        scrapedParty.removeIf(p -> p.equalsIgnoreCase(player.trim()));
+                    }
+                }
+            }
+
+            // Scrape list output
+            if (text.startsWith("队长：") || text.startsWith("队长:")) {
+                String leader = text.substring(3).trim();
+                if (!leader.isEmpty()) {
+                    scrapedParty.add(leader);
+                }
+            }
+            if (text.startsWith("队员：") || text.startsWith("队员:")) {
+                String membersStr = text.substring(3).trim();
+                String[] members = membersStr.split("[,，\\s]+");
+                for (String member : members) {
+                    if (!member.trim().isEmpty()) {
+                        scrapedParty.add(member.trim());
+                    }
+                }
+            }
+
+            // Intercept and hide auto party query list output
+            if (autoPartyQueryActive) {
+                boolean isHeader = text.contains("===== 组队");
+                boolean isLeader = text.startsWith("队长：") || text.startsWith("队长:");
+                boolean isMember = text.startsWith("队员：") || text.startsWith("队员:");
+                boolean isHelpLine = text.contains("/party ") || text.contains("/pc ");
+                if (isHeader || isLeader || isMember || isHelpLine) {
+                    if (text.contains("/party wp") && text.contains("/wp")) {
+                        autoPartyQueryActive = false; // Last help line
+                    }
+                    return true; // Drop line from chat hud
+                }
+            }
+        }
+
+        // 2. Scrape party chat for members strictly matching activePartyName prefix
         Pattern currentPartyChatPattern = partyChatPatternCompiled;
         if (currentPartyChatPattern != null) {
             try {
@@ -189,11 +283,11 @@ public class TpLockManager {
                     }
                 }
             } catch (Exception e) {
-                // Fallback for bad patterns
+                // Ignore pattern matching errors
             }
         }
 
-        // 2. Check for incoming TP requests
+        // 3. Check for incoming TP requests
         List<Pattern> currentIncomingRequestPatterns = incomingRequestPatternsCompiled;
         for (Pattern p : currentIncomingRequestPatterns) {
             try {
@@ -210,22 +304,36 @@ public class TpLockManager {
                     if (requester != null && !requester.trim().isEmpty()) {
                         latestRequester = requester.trim();
                         if (!isPlayerAllowed(requester)) {
-                            // Log blocked attempt to player
+                            latestRequestBlocked = true;
                             MinecraftClient client = MinecraftClient.getInstance();
                             if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
                                 client.inGameHud.getChatHud().addMessage(
                                     Text.literal("§c[TP-Lock] §f" + requester + " §7tried to teleport to you.")
                                 );
                             }
-                            return true; // Drop message from being displayed
+                            return true; // Hide request trigger line
+                        } else {
+                            latestRequestBlocked = false;
                         }
                     }
                 }
             } catch (Exception e) {
-                // Fallback for bad patterns
+                // Ignore pattern matching errors
             }
         }
-        return false; // Show normally
+
+        // 4. Hide follow-up instruction lines for blocked requests
+        if (latestRequestBlocked) {
+            if (text.contains("剩余处理时间:") || text.contains("接受请求请输入") || text.contains("拒绝请求请输入")) {
+                return true; // Drop details
+            }
+            if (text.contains("[接受]") && text.contains("[拒绝]") && text.contains("|")) {
+                latestRequestBlocked = false; // Reset block sequence
+                return true; // Drop options selector line
+            }
+        }
+
+        return false;
     }
 
     public static boolean handleOutgoingCommand(String rawCommand) {
@@ -243,13 +351,56 @@ public class TpLockManager {
         if (colonIndex != -1) {
             baseCmd = baseCmd.substring(colonIndex + 1);
         }
-        
+
         boolean isTpCmd = baseCmd.equals("tpa") || baseCmd.equals("tpahere");
         boolean isAcceptOrDenyCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes") || baseCmd.equals("tpdeny") || baseCmd.equals("tpno");
+        boolean isAutoAcceptToggleCmd = baseCmd.equals("tpatoggle") || baseCmd.equals("tpauto");
+        boolean isTpHereNowCmd = baseCmd.equals("tpaherenow");
+        boolean isBlockOrIgnoreCmd = baseCmd.equals("tpablock") || baseCmd.equals("tpaignore");
+        boolean isLeaveCmd = baseCmd.equals("party") && parts.length >= 2 && parts[1].equals("leave");
 
-        if (isTpCmd) {
+        if (isAutoAcceptToggleCmd) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                client.inGameHud.getChatHud().addMessage(
+                    Text.literal("§c[TP-Lock] Auto-accept toggling is disabled to enforce TP lockdown!")
+                );
+            }
+            return true;
+        } else if (isTpHereNowCmd) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                client.inGameHud.getChatHud().addMessage(
+                    Text.literal("§c[TP-Lock] Teleporting other players here immediately is disabled!")
+                );
+            }
+            return true;
+        } else if (isLeaveCmd) {
+            if (!isBypassActive()) {
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                    client.inGameHud.getChatHud().addMessage(
+                        Text.literal("§c[TP-Lock] Leaving parties is not allowed unless unlocked!")
+                    );
+                }
+                return true;
+            }
+        } else if (isBlockOrIgnoreCmd) {
+            if (parts.length >= 2) {
+                String targetPlayer = parts[1];
+                if (isPlayerInParty(targetPlayer)) {
+                    MinecraftClient client = MinecraftClient.getInstance();
+                    if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                        client.inGameHud.getChatHud().addMessage(
+                            Text.literal("§c[TP-Lock] Blocking/ignoring party members is not allowed!")
+                        );
+                    }
+                    return true;
+                }
+            }
+        } else if (isTpCmd) {
             if (parts.length < 2) {
-                return false; // Let server handle missing args
+                return false;
             }
             String targetPlayer = parts[1];
             if (!isPlayerAllowed(targetPlayer)) {
@@ -259,7 +410,7 @@ public class TpLockManager {
                         Text.literal("§c[TP-Lock] TPing other players is not allowed!")
                     );
                 }
-                return true; // Block command
+                return true;
             }
         } else if (isAcceptOrDenyCmd) {
             String targetPlayer = parts.length >= 2 ? parts[1] : latestRequester;
@@ -270,10 +421,20 @@ public class TpLockManager {
                         Text.literal("§c[TP-Lock] TPing other players is not allowed!")
                     );
                 }
-                return true; // Block command
+                return true;
             }
         }
 
-        return false; // Allow command
+        // Catch party chat message send commands to trigger name detection fallbacks
+        if (baseCmd.equals("pc") || baseCmd.equals("p")) {
+            if (parts.length >= 2) {
+                int spaceIdx = normalized.indexOf(' ');
+                if (spaceIdx != -1) {
+                    latestSentPartyMessage = normalized.substring(spaceIdx + 1).trim();
+                }
+            }
+        }
+
+        return false;
     }
 }
