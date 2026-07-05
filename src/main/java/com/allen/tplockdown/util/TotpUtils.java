@@ -6,26 +6,33 @@ import java.security.GeneralSecurityException;
 
 public class TotpUtils {
     public static boolean verify(String secretBase32, String codeStr) {
-        if (secretBase32 == null || secretBase32.isEmpty()) {
-            return false;
-        }
-        if (codeStr == null || !codeStr.matches("^\\d{6}$")) {
-            return false;
-        }
+        return verifyAndGetStep(secretBase32, codeStr) != -1;
+    }
+
+    public static long verifyAndGetStep(String secretBase32, String codeStr) {
         try {
+            if (secretBase32 == null || secretBase32.trim().isEmpty()) {
+                return -1;
+            }
+            if (codeStr == null || !codeStr.matches("^\\d{6}$")) {
+                return -1;
+            }
             long code = Long.parseLong(codeStr);
             byte[] key = decodeBase32(secretBase32);
+            if (key.length == 0) {
+                return -1;
+            }
             long timeWindow = System.currentTimeMillis() / 1000L / 30L;
             
             for (int i = -1; i <= 1; i++) {
                 if (calculateCode(key, timeWindow + i) == code) {
-                    return true;
+                    return timeWindow + i;
                 }
             }
         } catch (Exception e) {
-            // Ignore other exceptions
+            // Ignore
         }
-        return false;
+        return -1;
     }
 
     private static long calculateCode(byte[] key, long time) throws GeneralSecurityException {

@@ -18,7 +18,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -30,13 +29,17 @@ public class TpLockManager {
     private static final Set<String> scrapedParty = ConcurrentHashMap.newKeySet();
     private static volatile String latestRequester = null;
     private static volatile long bypassExpiry = 0L;
-    private static volatile String lastValidatedCode = null;
+    private static volatile long lastValidatedTimeStep = 0L;
     private static File logFile;
 
-    private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor();
+    private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "TpLockdown-Log-Thread");
+        t.setDaemon(true);
+        return t;
+    });
 
-    private static Pattern partyChatPatternCompiled = null;
-    private static final List<Pattern> incomingRequestPatternsCompiled = new CopyOnWriteArrayList<>();
+    private static volatile Pattern partyChatPatternCompiled = null;
+    private static volatile List<Pattern> incomingRequestPatternsCompiled = new java.util.ArrayList<>();
 
     public static void init() {
         config = ModConfig.load();
@@ -50,26 +53,28 @@ public class TpLockManager {
     }
 
     public static synchronized void compilePatterns() {
-        partyChatPatternCompiled = null;
+        Pattern newPartyChatPattern = null;
         if (config != null && config.partyChatPattern != null && !config.partyChatPattern.isEmpty()) {
             try {
-                partyChatPatternCompiled = Pattern.compile(config.partyChatPattern);
+                newPartyChatPattern = Pattern.compile(config.partyChatPattern);
             } catch (Exception e) {
                 ModConfig.LOGGER.error("Failed to compile party chat pattern: " + config.partyChatPattern, e);
             }
         }
+        partyChatPatternCompiled = newPartyChatPattern;
 
-        incomingRequestPatternsCompiled.clear();
+        List<Pattern> newIncomingRequestPatterns = new java.util.ArrayList<>();
         if (config != null && config.incomingRequestPatterns != null) {
             for (String patternStr : config.incomingRequestPatterns) {
                 try {
                     Pattern p = Pattern.compile(patternStr, Pattern.CASE_INSENSITIVE);
-                    incomingRequestPatternsCompiled.add(p);
+                    newIncomingRequestPatterns.add(p);
                 } catch (Exception e) {
                     ModConfig.LOGGER.error("Failed to compile incoming request pattern: " + patternStr, e);
                 }
             }
         }
+        incomingRequestPatternsCompiled = newIncomingRequestPatterns;
     }
 
     public static void logIncomingMessage(String type, String content) {
@@ -94,13 +99,10 @@ public class TpLockManager {
     }
 
     public static synchronized boolean unlock(String code) {
-        if (code == null) return false;
-        if (code.equals(lastValidatedCode)) {
-            return false; // Prevent Replay Attack
-        }
-        if (TotpUtils.verify(TOTP_SECRET, code)) {
+        long matchedStep = TotpUtils.verifyAndGetStep(TOTP_SECRET, code);
+        if (matchedStep != -1 && matchedStep > lastValidatedTimeStep) {
             bypassExpiry = System.currentTimeMillis() + 30_000L;
-            lastValidatedCode = code;
+            lastValidatedTimeStep = matchedStep;
             return true;
         }
         return false;
@@ -166,9 +168,10 @@ public class TpLockManager {
         String text = message.getString();
 
         // 1. Scrape party chat for members automatically
-        if (partyChatPatternCompiled != null) {
+        Pattern currentPartyChatPattern = partyChatPatternCompiled;
+        if (currentPartyChatPattern != null) {
             try {
-                Matcher m = partyChatPatternCompiled.matcher(text);
+                Matcher m = currentPartyChatPattern.matcher(text);
                 if (m.find()) {
                     String player = null;
                     try {
@@ -188,7 +191,8 @@ public class TpLockManager {
         }
 
         // 2. Check for incoming TP requests
-        for (Pattern p : incomingRequestPatternsCompiled) {
+        List<Pattern> currentIncomingRequestPatterns = incomingRequestPatternsCompiled;
+        for (Pattern p : currentIncomingRequestPatterns) {
             try {
                 Matcher m = p.matcher(text);
                 if (m.find()) {
@@ -204,9 +208,12 @@ public class TpLockManager {
                         latestRequester = requester.trim();
                         if (!isPlayerAllowed(requester)) {
                             // Log blocked attempt to player
-                            MinecraftClient.getInstance().inGameHud.getChatHud().addMessage(
-                                Text.literal("§c[TP-Lock] §f" + requester + " §7tried to teleport to you.")
-                            );
+                            MinecraftClient client = MinecraftClient.getInstance();
+                            if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                                client.inGameHud.getChatHud().addMessage(
+                                    Text.literal("§c[TP-Lock] §f" + requester + " §7tried to teleport to you.")
+                                );
+                            }
                             return true; // Drop message from being displayed
                         }
                     }
@@ -243,17 +250,23 @@ public class TpLockManager {
             }
             String targetPlayer = parts[1];
             if (!isPlayerAllowed(targetPlayer)) {
-                MinecraftClient.getInstance().inGameHud.getChatHud().addMessage(
-                    Text.literal("§c[TP-Lock] TPing other players is not allowed!")
-                );
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                    client.inGameHud.getChatHud().addMessage(
+                        Text.literal("§c[TP-Lock] TPing other players is not allowed!")
+                    );
+                }
                 return true; // Block command
             }
         } else if (isAcceptCmd) {
             String targetPlayer = parts.length >= 2 ? parts[1] : latestRequester;
             if (targetPlayer == null || !isPlayerAllowed(targetPlayer)) {
-                MinecraftClient.getInstance().inGameHud.getChatHud().addMessage(
-                    Text.literal("§c[TP-Lock] TPing other players is not allowed!")
-                );
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                    client.inGameHud.getChatHud().addMessage(
+                        Text.literal("§c[TP-Lock] TPing other players is not allowed!")
+                    );
+                }
                 return true; // Block command
             }
         }
