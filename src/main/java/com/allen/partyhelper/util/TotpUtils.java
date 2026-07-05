@@ -1,4 +1,4 @@
-package com.allen.tplockdown.util;
+package com.allen.partyhelper.util;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;

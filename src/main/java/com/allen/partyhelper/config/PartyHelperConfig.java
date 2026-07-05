@@ -1,4 +1,4 @@
-package com.allen.tplockdown.config;
+package com.allen.partyhelper.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -13,8 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ModConfig {
-    public static final Logger LOGGER = LoggerFactory.getLogger("TpLockdown");
+public class PartyHelperConfig {
+    public static final Logger LOGGER = LoggerFactory.getLogger("PartyHelper");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static File configFile;
 
@@ -29,46 +29,53 @@ public class ModConfig {
     public List<String> incomingTpaHerePatterns = new ArrayList<>();
     /** What to do with blocked TP requests: "timeout" (do nothing) or "reject" (auto-send deny). */
     public String rejectMethod = "timeout";
+    /** Block ALL TP requests when not in any party. Default true — disabling this is a security risk. */
+    public boolean blockWhenNoParty = true;
+    /** Log client-side warning/feedback chat message when autoaccepting. Default true. */
+    public boolean logAutoAccept = true;
 
     private static File getConfigFile() {
         if (configFile == null) {
-            configFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "tplockdown.json");
+            configFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "partyhelper.json");
         }
         return configFile;
     }
 
-    public static ModConfig load() {
+    public static PartyHelperConfig load() {
         File file = getConfigFile();
         if (!file.exists()) {
-            ModConfig config = new ModConfig();
+            PartyHelperConfig config = new PartyHelperConfig();
             config.initializeDefaultPatterns();
             config.save();
             return config;
         }
         try (FileReader reader = new FileReader(file, StandardCharsets.UTF_8)) {
-            ModConfig config = GSON.fromJson(reader, ModConfig.class);
-            if (config == null) config = new ModConfig();
+            PartyHelperConfig config = GSON.fromJson(reader, PartyHelperConfig.class);
+            if (config == null) config = new PartyHelperConfig();
             boolean stale = config.configVersion < CURRENT_CONFIG_VERSION
                 || config.incomingTpaPatterns == null || config.incomingTpaPatterns.isEmpty()
                 || config.incomingTpaHerePatterns == null || config.incomingTpaHerePatterns.isEmpty();
             if (stale) {
-                LOGGER.info("[TpLockdown] Config version {} outdated (current {}), re-initialising patterns",
+                LOGGER.info("[PartyHelper] Config version {} outdated (current {}), re-initialising patterns",
                     config.configVersion, CURRENT_CONFIG_VERSION);
                 config.initializeDefaultPatterns();
                 config.save();
             }
+            // Populate defaults for new fields if GSON deserialization left them as default primitive values but they were not present
+            // Java field initializers run before GSON deserialization, but GSON can overwrite them or if they're not in JSON they remain.
+            // Let's guarantee valid values:
             if (config.rejectMethod == null) config.rejectMethod = "timeout";
             return config;
         } catch (Exception e) {
-            LOGGER.error("[TpLockdown] Failed to load config, renaming corrupted file", e);
+            LOGGER.error("[PartyHelper] Failed to load config, renaming corrupted file", e);
             try {
-                File brokenFile = new File(file.getParentFile(), "tplockdown.json.broken");
+                File brokenFile = new File(file.getParentFile(), "partyhelper.json.broken");
                 if (brokenFile.exists()) brokenFile.delete();
                 if (!file.renameTo(brokenFile)) file.delete();
             } catch (Exception re) {
-                LOGGER.error("[TpLockdown] Failed to rename or delete corrupted config file", re);
+                LOGGER.error("[PartyHelper] Failed to rename or delete corrupted config file", re);
             }
-            ModConfig defaultConfig = new ModConfig();
+            PartyHelperConfig defaultConfig = new PartyHelperConfig();
             defaultConfig.initializeDefaultPatterns();
             defaultConfig.save();
             return defaultConfig;
@@ -103,8 +110,8 @@ public class ModConfig {
             try (FileWriter writer = new FileWriter(file, StandardCharsets.UTF_8)) {
                 GSON.toJson(this, writer);
             } catch (Exception e) {
-                LOGGER.error("[TpLockdown] Failed to save config", e);
+                LOGGER.error("[PartyHelper] Failed to save config", e);
             }
-        }, "TpLockdown-ConfigSave").start();
+        }, "PartyHelper-ConfigSave").start();
     }
 }

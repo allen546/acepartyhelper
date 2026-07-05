@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
-  "id": "tplockdown",
+  "id": "partyhelper",
   "version": "${version}",
-  "name": "TP Lockdown",
-  "description": "Client-side mod to lock down teleport requests to party members only, with TOTP bypass.",
+  "name": "PartyHelper",
+  "description": "Client-side mod to lock down teleport requests to party members only, with TOTP bypass, auto-accept, and log helpers.",
   "authors": [
     "allen"
   ],
   "contact": {
-    "sources": "https://github.com/allen/tplockdown"
+    "sources": "https://github.com/allen/partyhelper"
   },
   "license": "MIT",
-  "icon": "assets/tplockdown/icon.png",
+  "icon": "assets/partyhelper/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [
-      "com.allen.tplockdown.TpLockdownMod"
+      "com.allen.partyhelper.PartyHelperMod"
     ]
   },
   "depends": {
