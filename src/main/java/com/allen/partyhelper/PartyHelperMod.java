@@ -24,33 +24,9 @@ public class PartyHelperMod implements ClientModInitializer {
             PartyHelperManager.onJoinWorld();
         });
 
-        // Block outgoing commands and handle /global chat override
+        // Block outgoing commands
         ClientSendMessageEvents.ALLOW_COMMAND.register(command -> {
             if (processingMessage.get()) return true;
-            if (PartyHelperManager.getForcePartyChat()) {
-                String cmdTrim = command.trim();
-                if (cmdTrim.startsWith("global ") || cmdTrim.equals("global")) {
-                    net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
-                    if (client != null && client.getNetworkHandler() != null) {
-                        String message = cmdTrim.length() > 7 ? cmdTrim.substring(7).trim() : "";
-                        if (!message.isEmpty()) {
-                            processingMessage.set(true);
-                            try {
-                                client.getNetworkHandler().sendChatMessage(message);
-                            } finally {
-                                processingMessage.set(false);
-                            }
-                        } else {
-                            if (client.inGameHud != null && client.inGameHud.getChatHud() != null) {
-                                client.inGameHud.getChatHud().addMessage(
-                                    Text.literal("§c[PartyHelper] Usage: /global <message> to send a server-wide chat message.")
-                                );
-                            }
-                        }
-                    }
-                    return false; // Suppress command execution
-                }
-            }
             return !PartyHelperManager.handleOutgoingCommand(command);
         });
 
@@ -62,7 +38,7 @@ public class PartyHelperMod implements ClientModInitializer {
                 if (client != null && client.getNetworkHandler() != null) {
                     processingMessage.set(true);
                     try {
-                        client.getNetworkHandler().sendChatMessage("/pc " + message);
+                        client.getNetworkHandler().sendChatCommand("pc " + message);
                     } finally {
                         processingMessage.set(false);
                     }
@@ -323,6 +299,40 @@ public class PartyHelperMod implements ClientModInitializer {
             // Alias /partyhelper to /ph
             dispatcher.register(ClientCommandManager.literal("partyhelper")
                 .redirect(dispatcher.getRoot().getChild("ph"))
+            );
+
+            // Register client-side /global command to avoid invalid red command indicator
+            dispatcher.register(ClientCommandManager.literal("global")
+                .executes(context -> {
+                    context.getSource().sendFeedback(Text.literal(
+                        "§c[PartyHelper] Usage: /global <message> to send a server-wide chat message."
+                    ));
+                    return 1;
+                })
+                .then(ClientCommandManager.argument("message", StringArgumentType.greedyString())
+                    .executes(context -> {
+                        if (PartyHelperManager.getForcePartyChat()) {
+                            String msg = StringArgumentType.getString(context, "message");
+                            net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
+                            if (client != null && client.getNetworkHandler() != null) {
+                                processingMessage.set(true);
+                                try {
+                                    client.getNetworkHandler().sendChatMessage(msg);
+                                } finally {
+                                    processingMessage.set(false);
+                                }
+                            }
+                        } else {
+                            // If force-party-chat is disabled, send normal command to server or fallback
+                            String msg = StringArgumentType.getString(context, "message");
+                            net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
+                            if (client != null && client.getNetworkHandler() != null) {
+                                client.getNetworkHandler().sendChatMessage(msg);
+                            }
+                        }
+                        return 1;
+                    })
+                )
             );
         });
     }
