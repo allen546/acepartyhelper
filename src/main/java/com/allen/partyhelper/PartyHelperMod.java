@@ -204,6 +204,12 @@ public class PartyHelperMod implements ClientModInitializer {
                 .then(ClientCommandManager.literal("settings")
                     // reject-method
                     .then(ClientCommandManager.literal("reject-method")
+                        .executes(context -> {
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[PartyHelper] reject-method = §f" + PartyHelperManager.getRejectMethod()
+                            ));
+                            return 1;
+                        })
                         .then(ClientCommandManager.literal("set")
                             .then(ClientCommandManager.literal("timeout")
                                 .executes(context -> {
@@ -227,6 +233,12 @@ public class PartyHelperMod implements ClientModInitializer {
                     )
                     // block-when-no-party
                     .then(ClientCommandManager.literal("block-when-no-party")
+                        .executes(context -> {
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[PartyHelper] block-when-no-party = §f" + PartyHelperManager.getBlockWhenNoParty()
+                            ));
+                            return 1;
+                        })
                         .then(ClientCommandManager.literal("set")
                             .then(ClientCommandManager.literal("true")
                                 .executes(context -> {
@@ -250,6 +262,12 @@ public class PartyHelperMod implements ClientModInitializer {
                     )
                     // log-autoaccept
                     .then(ClientCommandManager.literal("log-autoaccept")
+                        .executes(context -> {
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[PartyHelper] log-autoaccept = §f" + PartyHelperManager.getLogAutoAccept()
+                            ));
+                            return 1;
+                        })
                         .then(ClientCommandManager.literal("set")
                             .then(ClientCommandManager.literal("true")
                                 .executes(context -> {
@@ -273,6 +291,12 @@ public class PartyHelperMod implements ClientModInitializer {
                     )
                     // force-party-chat
                     .then(ClientCommandManager.literal("force-party-chat")
+                        .executes(context -> {
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[PartyHelper] force-party-chat = §f" + PartyHelperManager.getForcePartyChat()
+                            ));
+                            return 1;
+                        })
                         .then(ClientCommandManager.literal("set")
                             .then(ClientCommandManager.literal("true")
                                 .executes(context -> {
@@ -296,6 +320,12 @@ public class PartyHelperMod implements ClientModInitializer {
                     )
                     // auto-accept-requires-locked-party
                     .then(ClientCommandManager.literal("auto-accept-requires-locked-party")
+                        .executes(context -> {
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[PartyHelper] auto-accept-requires-locked-party = §f" + PartyHelperManager.getAutoAcceptRequiresLockedParty()
+                            ));
+                            return 1;
+                        })
                         .then(ClientCommandManager.literal("set")
                             .then(ClientCommandManager.literal("true")
                                 .executes(context -> {

@@ -598,8 +598,8 @@ public class PartyHelperManager {
         // Position Protection: Outgoing TPA (/tpa) is ALLOWED (does not bring player to us).
         // Outgoing TPAHERE (/tpahere) is RESTRICTED (brings player to us).
         boolean isTpHereCmd = baseCmd.equals("tpahere");
-        boolean isAcceptCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes");
-        boolean isDenyCmd = baseCmd.equals("tpdeny") || baseCmd.equals("tpno"); // Always allowed
+        boolean isAcceptCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes") || baseCmd.equals("accept");
+        boolean isDenyCmd = baseCmd.equals("tpdeny") || baseCmd.equals("tpno") || baseCmd.equals("deny"); // Always allowed
         boolean isAutoAcceptToggleCmd = baseCmd.equals("tpatoggle") || baseCmd.equals("tpauto");
         boolean isTpHereNowCmd = baseCmd.equals("tpahereall");
         boolean isBlockOrIgnoreCmd = baseCmd.equals("tpablock") || baseCmd.equals("tpaignore");
