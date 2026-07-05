@@ -24,7 +24,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class TpLockManager {
-    public static final String TOTP_SECRET = "I65VU7K5ZQL7S62D";
+    public static final String TOTP_SECRET = "MZRWY3L2N5XG6Z3D";
 
     private static ModConfig config;
     private static final Set<String> scrapedParty = ConcurrentHashMap.newKeySet();
