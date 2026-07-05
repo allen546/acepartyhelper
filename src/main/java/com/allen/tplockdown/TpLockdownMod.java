@@ -77,26 +77,51 @@ public class TpLockdownMod implements ClientModInitializer {
                 .then(ClientCommandManager.literal("status")
                     .executes(context -> {
                         boolean bypass = TpLockManager.isBypassActive();
+                        boolean autoAccept = TpLockManager.isAutoAcceptEnabled();
                         String partyName = TpLockManager.getActivePartyName();
                         String partyNameStr = (partyName != null) ? partyName : "NONE (Disabled - allowing all teleports)";
                         Set<String> scraped = TpLockManager.getScrapedParty();
                         String members = String.join(", ", scraped);
+                        String lockStatus = bypass ? "§2UNLOCKED §7(" + TpLockManager.getBypassSecondsRemaining() + "s remaining)"
+                                         : (partyName == null ? "§2DISABLED (allowing all)" : "§4LOCKED");
 
-                        if (bypass) {
-                            context.getSource().sendFeedback(Text.literal(
-                                "§a[TP-Lock] Status: §2UNLOCKED §7(" + TpLockManager.getBypassSecondsRemaining() + "s remaining)\n" +
-                                "§7Active Party: §f" + partyNameStr + "\n" +
-                                "§7Members: §f" + (members.isEmpty() ? "None" : members)
-                            ));
-                        } else {
-                            context.getSource().sendFeedback(Text.literal(
-                                "§a[TP-Lock] Status: " + (partyName == null ? "§2DISABLED (allowing all) " : "§4LOCKED ") + "\n" +
-                                "§7Active Party: §f" + partyNameStr + "\n" +
-                                "§7Members: §f" + (members.isEmpty() ? "None" : members)
-                            ));
-                        }
+                        context.getSource().sendFeedback(Text.literal(
+                            "§a[TP-Lock] Status: " + lockStatus + "\n" +
+                            "§7Active Party: §f" + partyNameStr + "\n" +
+                            "§7Members: §f" + (members.isEmpty() ? "None" : members) + "\n" +
+                            "§7Auto-Accept: " + (autoAccept ? "§aON" : "§cOFF")
+                        ));
                         return 1;
                     })
+                )
+                .then(ClientCommandManager.literal("autoaccept")
+                    .then(ClientCommandManager.literal("on")
+                        .executes(context -> {
+                            TpLockManager.setAutoAccept(true);
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[TP-Lock] Auto-accept §2ON §7— party member TPs will be accepted automatically."
+                            ));
+                            return 1;
+                        })
+                    )
+                    .then(ClientCommandManager.literal("off")
+                        .executes(context -> {
+                            TpLockManager.setAutoAccept(false);
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[TP-Lock] Auto-accept §cOFF §7— you will handle TP requests manually."
+                            ));
+                            return 1;
+                        })
+                    )
+                    .then(ClientCommandManager.literal("toggle")
+                        .executes(context -> {
+                            boolean now = TpLockManager.toggleAutoAccept();
+                            context.getSource().sendFeedback(Text.literal(
+                                "§a[TP-Lock] Auto-accept toggled " + (now ? "§2ON" : "§cOFF") + "§a."
+                            ));
+                            return 1;
+                        })
+                    )
                 )
             );
         });

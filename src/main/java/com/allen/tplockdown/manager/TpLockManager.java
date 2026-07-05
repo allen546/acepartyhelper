@@ -38,6 +38,9 @@ public class TpLockManager {
 
     private static volatile boolean latestRequestBlocked = false;
     private static volatile boolean autoPartyQueryActive = false;
+    private static volatile boolean autoAcceptEnabled = false;
+    private static volatile boolean pendingAutoAccept = false;
+    private static volatile String pendingAutoAcceptCmd = "tpaccept"; // Default accept command
 
     private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "TpLockdown-Log-Thread");
@@ -150,6 +153,21 @@ public class TpLockManager {
 
     public static synchronized void clearScrapedParty() {
         scrapedParty.clear();
+    }
+
+    public static boolean isAutoAcceptEnabled() {
+        return autoAcceptEnabled;
+    }
+
+    public static void setAutoAccept(boolean enabled) {
+        autoAcceptEnabled = enabled;
+        if (!enabled) pendingAutoAccept = false;
+    }
+
+    public static boolean toggleAutoAccept() {
+        autoAcceptEnabled = !autoAcceptEnabled;
+        if (!autoAcceptEnabled) pendingAutoAccept = false;
+        return autoAcceptEnabled;
     }
 
     public static void onJoinWorld() {
@@ -342,14 +360,13 @@ public class TpLockManager {
                     try {
                         requester = m.group("player");
                     } catch (IllegalArgumentException e) {
-                        if (m.groupCount() >= 1) {
-                            requester = m.group(1);
-                        }
+                        if (m.groupCount() >= 1) requester = m.group(1);
                     }
                     if (requester != null && !requester.trim().isEmpty()) {
                         latestRequester = requester.trim();
                         if (!isPlayerAllowed(requester)) {
                             latestRequestBlocked = true;
+                            pendingAutoAccept = false;
                             MinecraftClient client = MinecraftClient.getInstance();
                             if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
                                 client.inGameHud.getChatHud().addMessage(
@@ -359,6 +376,10 @@ public class TpLockManager {
                             return true; // Hide request trigger line
                         } else {
                             latestRequestBlocked = false;
+                            // Party member — queue auto-accept if enabled
+                            if (autoAcceptEnabled) {
+                                pendingAutoAccept = true;
+                            }
                         }
                     }
                 }
@@ -367,14 +388,39 @@ public class TpLockManager {
             }
         }
 
-        // 4. Hide follow-up instruction lines for blocked requests
-        if (latestRequestBlocked) {
-            if (text.contains("剩余处理时间:") || text.contains("接受请求请输入") || text.contains("拒绝请求请输入")) {
-                return true; // Drop details
+        // 4. Handle follow-up lines (接受/拒绝 instructions)
+        if (text.contains("接受请求请输入") || text.contains("拒绝请求请输入")) {
+            // Parse the actual accept command from the line for auto-accept
+            if (text.contains("接受请求请输入") && pendingAutoAccept) {
+                Matcher cmdMatcher = Pattern.compile("/(?<cmd>\\S+)").matcher(text);
+                if (cmdMatcher.find()) {
+                    pendingAutoAcceptCmd = cmdMatcher.group("cmd");
+                }
             }
-            if (text.contains("[接受]") && text.contains("[拒绝]") && text.contains("|")) {
-                latestRequestBlocked = false; // Reset block sequence
-                return true; // Drop options selector line
+            if (latestRequestBlocked) return true;
+        }
+        if (text.contains("剩余处理时间:")) {
+            if (pendingAutoAccept) {
+                // Auto-accept: send the accept command now
+                final String cmd = pendingAutoAcceptCmd;
+                pendingAutoAccept = false;
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null) {
+                    client.execute(() -> {
+                        if (client.getNetworkHandler() != null) {
+                            client.getNetworkHandler().sendChatCommand(cmd);
+                        }
+                    });
+                }
+                return true; // Hide countdown line
+            }
+            if (latestRequestBlocked) return true;
+        }
+        if (text.contains("[接受]") && text.contains("[拒绝]") && text.contains("|")) {
+            if (pendingAutoAccept) return true; // Hide options during auto-accept
+            if (latestRequestBlocked) {
+                latestRequestBlocked = false;
+                return true;
             }
         }
 
@@ -398,7 +444,8 @@ public class TpLockManager {
         }
 
         boolean isTpCmd = baseCmd.equals("tpa") || baseCmd.equals("tpahere");
-        boolean isAcceptOrDenyCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes") || baseCmd.equals("tpdeny") || baseCmd.equals("tpno");
+        boolean isAcceptCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes");
+        boolean isDenyCmd = baseCmd.equals("tpdeny") || baseCmd.equals("tpno"); // Always allowed
         boolean isAutoAcceptToggleCmd = baseCmd.equals("tpatoggle") || baseCmd.equals("tpauto");
         boolean isTpHereNowCmd = baseCmd.equals("tpahereall");
         boolean isBlockOrIgnoreCmd = baseCmd.equals("tpablock") || baseCmd.equals("tpaignore");
@@ -457,9 +504,7 @@ public class TpLockManager {
                 }
             }
         } else if (isTpCmd) {
-            if (parts.length < 2) {
-                return false;
-            }
+            if (parts.length < 2) return false;
             String targetPlayer = parts[1];
             if (!isPlayerAllowed(targetPlayer)) {
                 MinecraftClient client = MinecraftClient.getInstance();
@@ -470,7 +515,8 @@ public class TpLockManager {
                 }
                 return true;
             }
-        } else if (isAcceptOrDenyCmd) {
+        } else if (isAcceptCmd) {
+            // Block accepting TP requests from non-party players
             String targetPlayer = parts.length >= 2 ? parts[1] : latestRequester;
             if (targetPlayer == null || !isPlayerAllowed(targetPlayer)) {
                 MinecraftClient client = MinecraftClient.getInstance();
@@ -482,6 +528,7 @@ public class TpLockManager {
                 return true;
             }
         }
+        // isDenyCmd always passes through — manual rejection is always allowed
 
         return false;
     }
