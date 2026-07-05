@@ -18,6 +18,10 @@ public class ModConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static File configFile;
 
+    // Bump this any time initializeDefaultPatterns() changes
+    private static final int CURRENT_CONFIG_VERSION = 2;
+
+    public int configVersion = 0;
     public String activePartyName = null;
     public List<String> incomingRequestPatterns = new ArrayList<>();
 
@@ -41,20 +45,22 @@ public class ModConfig {
             if (config == null) {
                 config = new ModConfig();
             }
-            if (config.incomingRequestPatterns == null || config.incomingRequestPatterns.isEmpty()) {
+            boolean stale = config.incomingRequestPatterns == null
+                || config.incomingRequestPatterns.isEmpty()
+                || config.configVersion < CURRENT_CONFIG_VERSION;
+            if (stale) {
+                LOGGER.info("[TpLockdown] Config version {} is outdated (current: {}), re-initializing patterns",
+                    config.configVersion, CURRENT_CONFIG_VERSION);
                 config.initializeDefaultPatterns();
+                config.save();
             }
             return config;
         } catch (Exception e) {
             LOGGER.error("[TpLockdown] Failed to load config, renaming corrupted file", e);
             try {
                 File brokenFile = new File(file.getParentFile(), "tplockdown.json.broken");
-                if (brokenFile.exists()) {
-                    brokenFile.delete();
-                }
-                if (!file.renameTo(brokenFile)) {
-                    file.delete();
-                }
+                if (brokenFile.exists()) brokenFile.delete();
+                if (!file.renameTo(brokenFile)) file.delete();
             } catch (Exception re) {
                 LOGGER.error("[TpLockdown] Failed to rename or delete corrupted config file", re);
             }
@@ -79,6 +85,7 @@ public class ModConfig {
         // Chinese default patterns
         incomingRequestPatterns.add("^\\s*\\[传送\\]\\s*(?<player>\\w+)\\s*想传送到你这里。");
         incomingRequestPatterns.add("^\\s*\\[传送\\]\\s*(?<player>\\w+)\\s*邀请你传送到他那里。");
+        configVersion = CURRENT_CONFIG_VERSION;
     }
 
     public void save() {
