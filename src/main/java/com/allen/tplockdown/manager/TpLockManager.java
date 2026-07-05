@@ -245,7 +245,7 @@ public class TpLockManager {
         }
         
         boolean isTpCmd = baseCmd.equals("tpa") || baseCmd.equals("tpahere");
-        boolean isAcceptCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes");
+        boolean isAcceptOrDenyCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes") || baseCmd.equals("tpdeny") || baseCmd.equals("tpno");
 
         if (isTpCmd) {
             if (parts.length < 2) {
@@ -261,7 +261,7 @@ public class TpLockManager {
                 }
                 return true; // Block command
             }
-        } else if (isAcceptCmd) {
+        } else if (isAcceptOrDenyCmd) {
             String targetPlayer = parts.length >= 2 ? parts[1] : latestRequester;
             if (targetPlayer == null || !isPlayerAllowed(targetPlayer)) {
                 MinecraftClient client = MinecraftClient.getInstance();
