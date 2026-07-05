@@ -38,7 +38,6 @@ public class TpLockManager {
 
     private static volatile boolean latestRequestBlocked = false;
     private static volatile boolean autoPartyQueryActive = false;
-    private static volatile String latestSentPartyMessage = null;
 
     private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "TpLockdown-Log-Thread");
@@ -156,7 +155,6 @@ public class TpLockManager {
     public static void onJoinWorld() {
         scrapedParty.clear();
         latestRequestBlocked = false;
-        latestSentPartyMessage = null;
         setActivePartyName(null);
 
         Thread t = new Thread(() -> {
@@ -165,8 +163,8 @@ public class TpLockManager {
                 MinecraftClient client = MinecraftClient.getInstance();
                 if (client != null) {
                     client.execute(() -> {
+                        triggerAutoQueryActive();
                         if (client.getNetworkHandler() != null && client.player != null) {
-                            autoPartyQueryActive = true;
                             client.getNetworkHandler().sendChatCommand("party list");
                         }
                     });
@@ -179,10 +177,25 @@ public class TpLockManager {
         t.start();
     }
 
+    private static synchronized void triggerAutoQueryActive() {
+        autoPartyQueryActive = true;
+        // Safety timeout to prevent locking chat filter indefinitely
+        Thread t = new Thread(() -> {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+            autoPartyQueryActive = false;
+        }, "TpLockdown-AutoQueryTimeout");
+        t.setDaemon(true);
+        t.start();
+    }
+
     public static void refreshParty() {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client != null && client.getNetworkHandler() != null) {
-            autoPartyQueryActive = true;
+            triggerAutoQueryActive();
             client.getNetworkHandler().sendChatCommand("party list");
         }
     }
@@ -229,6 +242,20 @@ public class TpLockManager {
                     if (player != null && !player.trim().isEmpty()) {
                         scrapedParty.removeIf(p -> p.equalsIgnoreCase(player.trim()));
                     }
+                }
+            }
+
+            // Detect if player themselves leaves or party is disbanded/kicked
+            boolean isSelfLeave = text.contains("你离开了队伍") || text.contains("你已离开了队伍") || text.contains("你被移出了队伍") || text.contains("你被踢出了队伍") || (text.contains("被移出队伍") && text.contains("你"));
+            boolean isDisband = text.contains("解散了队伍") || text.contains("队伍已解散") || text.contains("队伍解散");
+            if (isSelfLeave || isDisband) {
+                setActivePartyName(null);
+                clearScrapedParty();
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                    client.inGameHud.getChatHud().addMessage(
+                        Text.literal("§c[TP-Lock] Left party or party disbanded. TP Lock disabled.")
+                    );
                 }
             }
 
@@ -422,16 +449,6 @@ public class TpLockManager {
                     );
                 }
                 return true;
-            }
-        }
-
-        // Catch party chat message send commands to trigger name detection fallbacks
-        if (baseCmd.equals("pc") || baseCmd.equals("p")) {
-            if (parts.length >= 2) {
-                int spaceIdx = normalized.indexOf(' ');
-                if (spaceIdx != -1) {
-                    latestSentPartyMessage = normalized.substring(spaceIdx + 1).trim();
-                }
             }
         }
 
