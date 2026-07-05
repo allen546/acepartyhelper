@@ -18,6 +18,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -35,7 +36,7 @@ public class TpLockManager {
     private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor();
 
     private static Pattern partyChatPatternCompiled = null;
-    private static final List<Pattern> incomingRequestPatternsCompiled = new java.util.ArrayList<>();
+    private static final List<Pattern> incomingRequestPatternsCompiled = new CopyOnWriteArrayList<>();
 
     public static void init() {
         config = ModConfig.load();
@@ -107,6 +108,9 @@ public class TpLockManager {
 
     public static synchronized boolean isPlayerAllowed(String player) {
         if (player == null || config == null) return false;
+        if (config.manualParty == null) {
+            config.manualParty = new HashSet<>();
+        }
         String name = player.trim().toLowerCase();
         return isBypassActive() || 
                config.manualParty.stream().anyMatch(p -> p.equalsIgnoreCase(name)) || 
@@ -114,24 +118,40 @@ public class TpLockManager {
     }
 
     public static synchronized void addManualPartyMember(String player) {
-        if (player == null) return;
+        if (player == null || config == null) return;
+        if (config.manualParty == null) {
+            config.manualParty = new HashSet<>();
+        }
         config.manualParty.add(player.trim());
         config.save();
     }
 
     public static synchronized void removeManualPartyMember(String player) {
-        if (player == null) return;
+        if (player == null || config == null) return;
+        if (config.manualParty == null) {
+            config.manualParty = new HashSet<>();
+        }
         config.manualParty.removeIf(p -> p.equalsIgnoreCase(player.trim()));
         config.save();
     }
 
     public static synchronized void clearManualParty() {
+        if (config == null) return;
+        if (config.manualParty == null) {
+            config.manualParty = new HashSet<>();
+        }
         config.manualParty.clear();
         config.save();
     }
 
-    public static Set<String> getManualParty() {
-        return config.manualParty;
+    public static synchronized Set<String> getManualParty() {
+        if (config == null) {
+            return new HashSet<>();
+        }
+        if (config.manualParty == null) {
+            config.manualParty = new HashSet<>();
+        }
+        return new HashSet<>(config.manualParty);
     }
 
     public static Set<String> getScrapedParty() {
@@ -201,7 +221,7 @@ public class TpLockManager {
     public static boolean handleOutgoingCommand(String rawCommand) {
         if (rawCommand == null) return false;
         rawCommand = rawCommand.trim();
-        if (rawCommand.startsWith("/")) {
+        while (rawCommand.startsWith("/")) {
             rawCommand = rawCommand.substring(1);
         }
         String normalized = rawCommand.trim().toLowerCase();
@@ -209,6 +229,10 @@ public class TpLockManager {
         if (parts.length == 0) return false;
 
         String baseCmd = parts[0];
+        int colonIndex = baseCmd.indexOf(':');
+        if (colonIndex != -1) {
+            baseCmd = baseCmd.substring(colonIndex + 1);
+        }
         
         boolean isTpCmd = baseCmd.equals("tpa") || baseCmd.equals("tpahere");
         boolean isAcceptCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes");
