@@ -34,13 +34,16 @@ public class TpLockManager {
     private static File logFile;
 
     private static volatile Pattern partyChatPatternCompiled = null;
-    private static volatile List<Pattern> incomingRequestPatternsCompiled = new ArrayList<>();
+    private static volatile List<Pattern> incomingTpaPatternsCompiled = new ArrayList<>();
+    private static volatile List<Pattern> incomingTpaHerePatternsCompiled = new ArrayList<>();
 
     private static volatile boolean latestRequestBlocked = false;
     private static volatile boolean autoPartyQueryActive = false;
-    private static volatile boolean autoAcceptEnabled = false;
-    private static volatile boolean pendingAutoAccept = false;
-    private static volatile String pendingAutoAcceptCmd = "tpaccept"; // Default accept command
+    private static volatile boolean autoAcceptTpa = false;
+    private static volatile boolean autoAcceptTpaHere = false;
+    private static volatile boolean pendingAutoAccept = false;  // set per-request based on type
+    private static volatile String pendingAutoAcceptCmd = "tpaccept";
+    private static volatile String pendingDenyCmd = "tpno";
 
     private static final ExecutorService logExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "TpLockdown-Log-Thread");
@@ -71,17 +74,21 @@ public class TpLockManager {
             ModConfig.LOGGER.error("[TpLockdown] Failed to compile partyChatPattern", e);
         }
 
+        incomingTpaPatternsCompiled = compileList(config.incomingTpaPatterns, "tpa");
+        incomingTpaHerePatternsCompiled = compileList(config.incomingTpaHerePatterns, "tpahere");
+    }
+
+    private static List<Pattern> compileList(List<String> patterns, String label) {
         List<Pattern> compiled = new ArrayList<>();
-        if (config.incomingRequestPatterns != null) {
-            for (String patternStr : config.incomingRequestPatterns) {
-                try {
-                    compiled.add(Pattern.compile(patternStr, Pattern.CASE_INSENSITIVE));
-                } catch (Exception e) {
-                    ModConfig.LOGGER.error("[TpLockdown] Failed to compile incoming request pattern: " + patternStr, e);
-                }
+        if (patterns == null) return compiled;
+        for (String patternStr : patterns) {
+            try {
+                compiled.add(Pattern.compile(patternStr, Pattern.CASE_INSENSITIVE));
+            } catch (Exception e) {
+                ModConfig.LOGGER.error("[TpLockdown] Failed to compile {} pattern: {}", label, patternStr);
             }
         }
-        incomingRequestPatternsCompiled = compiled;
+        return compiled;
     }
 
     public static void logIncomingMessage(String type, String content) {
@@ -155,19 +162,27 @@ public class TpLockManager {
         scrapedParty.clear();
     }
 
-    public static boolean isAutoAcceptEnabled() {
-        return autoAcceptEnabled;
-    }
+    public static boolean isAutoAcceptTpa() { return autoAcceptTpa; }
+    public static boolean isAutoAcceptTpaHere() { return autoAcceptTpaHere; }
 
-    public static void setAutoAccept(boolean enabled) {
-        autoAcceptEnabled = enabled;
-        if (!enabled) pendingAutoAccept = false;
+    public static void setAutoAcceptTpa(boolean v) {
+        autoAcceptTpa = v;
+        if (!v && !autoAcceptTpaHere) pendingAutoAccept = false;
     }
+    public static void setAutoAcceptTpaHere(boolean v) {
+        autoAcceptTpaHere = v;
+        if (!v && !autoAcceptTpa) pendingAutoAccept = false;
+    }
+    public static boolean toggleAutoAcceptTpa() { autoAcceptTpa = !autoAcceptTpa; return autoAcceptTpa; }
+    public static boolean toggleAutoAcceptTpaHere() { autoAcceptTpaHere = !autoAcceptTpaHere; return autoAcceptTpaHere; }
 
-    public static boolean toggleAutoAccept() {
-        autoAcceptEnabled = !autoAcceptEnabled;
-        if (!autoAcceptEnabled) pendingAutoAccept = false;
-        return autoAcceptEnabled;
+    public static String getRejectMethod() {
+        return config != null && config.rejectMethod != null ? config.rejectMethod : "timeout";
+    }
+    public static void setRejectMethod(String method) {
+        if (config == null) return;
+        config.rejectMethod = method;
+        config.save();
     }
 
     public static void onJoinWorld() {
@@ -339,9 +354,7 @@ public class TpLockManager {
                     try {
                         player = m.group("player");
                     } catch (IllegalArgumentException e) {
-                        if (m.groupCount() >= 1) {
-                            player = m.group(1);
-                        }
+                        if (m.groupCount() >= 1) player = m.group(1);
                     }
                     if (player != null && !player.trim().isEmpty()) {
                         scrapedParty.add(player.trim());
@@ -352,79 +365,73 @@ public class TpLockManager {
             }
         }
 
-        // 3. Check for incoming TP requests
-        List<Pattern> currentIncomingRequestPatterns = incomingRequestPatternsCompiled;
-        for (Pattern p : currentIncomingRequestPatterns) {
-            try {
-                Matcher m = p.matcher(text);
-                if (m.find()) {
-                    String requester = null;
-                    try {
-                        requester = m.group("player");
-                    } catch (IllegalArgumentException e) {
-                        if (m.groupCount() >= 1) requester = m.group(1);
-                    }
-                    if (requester != null && !requester.trim().isEmpty()) {
-                        latestRequester = requester.trim();
-                        boolean allowed = isPlayerAllowed(requester);
-                        ModConfig.LOGGER.info("[TpLockdown] TP request from '{}' | allowed={} | autoAccept={} | party={} | scraped={}",
-                            requester, allowed, autoAcceptEnabled, config != null ? config.activePartyName : "null", scrapedParty);
-                        if (!allowed) {
-                            latestRequestBlocked = true;
-                            pendingAutoAccept = false;
-                            MinecraftClient client = MinecraftClient.getInstance();
-                            if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
-                                client.inGameHud.getChatHud().addMessage(
-                                    Text.literal("§c[TP-Lock] §f" + requester + " §7tried to teleport to you.")
-                                );
-                            }
-                            return true; // Hide request trigger line
-                        } else {
-                            latestRequestBlocked = false;
-                            // Party member — queue auto-accept if enabled
-                            if (autoAcceptEnabled) {
-                                pendingAutoAccept = true;
-                                ModConfig.LOGGER.info("[TpLockdown] Queued auto-accept for '{}'", requester);
-                            }
-                        }
-                    }
+        // 3. Check for incoming TP requests — tpa and tpahere pattern lists separately
+        String matchedRequester = matchRequester(text, incomingTpaPatternsCompiled);
+        boolean isTpaType = matchedRequester != null;
+        if (matchedRequester == null) {
+            matchedRequester = matchRequester(text, incomingTpaHerePatternsCompiled);
+        }
+        if (matchedRequester != null) {
+            latestRequester = matchedRequester;
+            boolean allowed = isPlayerAllowed(matchedRequester);
+            boolean shouldAutoAccept = allowed && (isTpaType ? autoAcceptTpa : autoAcceptTpaHere);
+            ModConfig.LOGGER.info("[TpLockdown] TP request ({}) from '{}' | allowed={} | autoAccept={} | party={} | scraped={}",
+                isTpaType ? "tpa" : "tpahere", matchedRequester, allowed,
+                shouldAutoAccept, config != null ? config.activePartyName : "null", scrapedParty);
+            if (!allowed) {
+                latestRequestBlocked = true;
+                pendingAutoAccept = false;
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                    client.inGameHud.getChatHud().addMessage(
+                        Text.literal("\u00a7c[TP-Lock] \u00a7f" + matchedRequester + " \u00a77tried to teleport to you.")
+                    );
                 }
-            } catch (Exception e) {
-                // Ignore pattern matching errors
+                return true;
+            } else {
+                latestRequestBlocked = false;
+                pendingAutoAccept = shouldAutoAccept;
+                if (shouldAutoAccept) ModConfig.LOGGER.info("[TpLockdown] Queued auto-accept for '{}'", matchedRequester);
             }
         }
 
         // 4. Handle follow-up lines (接受/拒绝 instructions)
         if (text.contains("接受请求请输入") || text.contains("拒绝请求请输入")) {
-            // Parse the actual accept command from the line for auto-accept
-            if (text.contains("接受请求请输入") && pendingAutoAccept) {
+            if (text.contains("接受请求请输入")) {
                 Matcher cmdMatcher = Pattern.compile("/(?<cmd>\\S+)").matcher(text);
-                if (cmdMatcher.find()) {
-                    pendingAutoAcceptCmd = cmdMatcher.group("cmd");
-                }
+                if (cmdMatcher.find()) pendingAutoAcceptCmd = cmdMatcher.group("cmd");
+            }
+            if (text.contains("拒绝请求请输入")) {
+                Matcher cmdMatcher = Pattern.compile("/(?<cmd>\\S+)").matcher(text);
+                if (cmdMatcher.find()) pendingDenyCmd = cmdMatcher.group("cmd");
             }
             if (latestRequestBlocked) return true;
         }
         if (text.contains("剩余处理时间:")) {
             if (pendingAutoAccept) {
-                // Auto-accept: send the accept command now
                 final String cmd = pendingAutoAcceptCmd;
                 pendingAutoAccept = false;
-                ModConfig.LOGGER.info("[TpLockdown] Auto-accepting TP with command '/{}'" , cmd);
+                ModConfig.LOGGER.info("[TpLockdown] Auto-accepting TP with /{}", cmd);
                 MinecraftClient client = MinecraftClient.getInstance();
-                if (client != null) {
-                    client.execute(() -> {
-                        if (client.getNetworkHandler() != null) {
-                            client.getNetworkHandler().sendChatCommand(cmd);
-                        }
+                if (client != null) client.execute(() -> {
+                    if (client.getNetworkHandler() != null) client.getNetworkHandler().sendChatCommand(cmd);
+                });
+                return true;
+            }
+            if (latestRequestBlocked) {
+                if ("reject".equals(getRejectMethod())) {
+                    final String cmd = pendingDenyCmd;
+                    ModConfig.LOGGER.info("[TpLockdown] Auto-rejecting blocked TP with /{}", cmd);
+                    MinecraftClient client = MinecraftClient.getInstance();
+                    if (client != null) client.execute(() -> {
+                        if (client.getNetworkHandler() != null) client.getNetworkHandler().sendChatCommand(cmd);
                     });
                 }
-                return true; // Hide countdown line
+                return true;
             }
-            if (latestRequestBlocked) return true;
         }
         if (text.contains("[接受]") && text.contains("[拒绝]") && text.contains("|")) {
-            if (pendingAutoAccept) return true; // Hide options during auto-accept
+            if (pendingAutoAccept) return true;
             if (latestRequestBlocked) {
                 latestRequestBlocked = false;
                 return true;
@@ -434,6 +441,22 @@ public class TpLockManager {
         return false;
     }
 
+    /** Tries to match a requester name from any pattern in the list. Returns name or null. */
+    private static String matchRequester(String text, List<Pattern> patterns) {
+        for (Pattern p : patterns) {
+            try {
+                Matcher m = p.matcher(text);
+                if (m.find()) {
+                    String name = null;
+                    try { name = m.group("player"); } catch (IllegalArgumentException e) {
+                        if (m.groupCount() >= 1) name = m.group(1);
+                    }
+                    if (name != null && !name.trim().isEmpty()) return name.trim();
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
     public static boolean handleOutgoingCommand(String rawCommand) {
         if (rawCommand == null) return false;
         rawCommand = rawCommand.trim();
