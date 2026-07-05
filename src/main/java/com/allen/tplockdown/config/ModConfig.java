@@ -19,9 +19,16 @@ public class ModConfig {
     public List<String> incomingRequestPatterns = new ArrayList<>();
     public String partyChatPattern = "^\\[队内\\]\\s*(?<player>\\w+)";
 
+    private static File getConfigFile() {
+        if (configFile == null) {
+            configFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "tplockdown.json");
+        }
+        return configFile;
+    }
+
     public static ModConfig load() {
-        configFile = new File(FabricLoader.getInstance().getConfigDir().toFile(), "tplockdown.json");
-        if (!configFile.exists()) {
+        File file = getConfigFile();
+        if (!file.exists()) {
             ModConfig config = new ModConfig();
             // Standard default teleport patterns
             config.incomingRequestPatterns.add("(?<player>\\w+)\\s+wants to teleport to you");
@@ -32,8 +39,11 @@ public class ModConfig {
             config.save();
             return config;
         }
-        try (FileReader reader = new FileReader(configFile)) {
+        try (FileReader reader = new FileReader(file)) {
             ModConfig config = GSON.fromJson(reader, ModConfig.class);
+            if (config == null) {
+                config = new ModConfig();
+            }
             if (config.incomingRequestPatterns == null) {
                 config.incomingRequestPatterns = new ArrayList<>();
             }
@@ -42,16 +52,30 @@ public class ModConfig {
             }
             return config;
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("[TpLockdown] Failed to load config, renaming corrupted file: " + e.getMessage());
+            try {
+                File brokenFile = new File(file.getParentFile(), "tplockdown.json.broken");
+                if (brokenFile.exists()) {
+                    brokenFile.delete();
+                }
+                file.renameTo(brokenFile);
+            } catch (Exception re) {
+                System.err.println("[TpLockdown] Failed to rename corrupted config file: " + re.getMessage());
+            }
             return new ModConfig();
         }
     }
 
     public void save() {
-        try (FileWriter writer = new FileWriter(configFile)) {
+        File file = getConfigFile();
+        File parent = file.getParentFile();
+        if (parent != null) {
+            parent.mkdirs();
+        }
+        try (FileWriter writer = new FileWriter(file)) {
             GSON.toJson(this, writer);
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("[TpLockdown] Failed to save config: " + e.getMessage());
         }
     }
 }

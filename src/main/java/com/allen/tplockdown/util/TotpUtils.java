@@ -6,8 +6,14 @@ import java.security.GeneralSecurityException;
 
 public class TotpUtils {
     public static boolean verify(String secretBase32, String codeStr) {
+        if (secretBase32 == null || secretBase32.trim().isEmpty()) {
+            return false;
+        }
+        if (codeStr == null || !codeStr.trim().matches("^\\d{6}$")) {
+            return false;
+        }
         try {
-            long code = Long.parseLong(codeStr);
+            long code = Long.parseLong(codeStr.trim());
             byte[] key = decodeBase32(secretBase32);
             long timeWindow = System.currentTimeMillis() / 1000L / 30L;
             
@@ -17,7 +23,7 @@ public class TotpUtils {
                 }
             }
         } catch (Exception e) {
-            // Ignore invalid parsing
+            // Ignore other exceptions
         }
         return false;
     }
