@@ -1,7 +1,7 @@
 package com.allen.partyhelper.manager;
 
 import com.allen.partyhelper.config.PartyHelperConfig;
-import com.allen.partyhelper.util.TotpUtils;
+
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
@@ -52,8 +52,6 @@ public class PartyHelperManager {
 
     private static volatile boolean latestRequestBlocked = false;
     private static volatile boolean autoPartyQueryActive = false;
-    private static volatile boolean autoAcceptTpa = false;
-    private static volatile boolean autoAcceptTpaHere = false;
     private static volatile boolean pendingAutoAccept = false;
     private static volatile String pendingAutoAcceptCmd = "tpaccept";
     private static volatile String pendingDenyCmd = "tpno";
@@ -210,19 +208,37 @@ public class PartyHelperManager {
         scrapedParty.clear();
     }
 
-    public static boolean isAutoAcceptTpa() { return autoAcceptTpa; }
-    public static boolean isAutoAcceptTpaHere() { return autoAcceptTpaHere; }
+    public static boolean isAutoAcceptTpa() {
+        return config != null && config.autoAcceptTpa;
+    }
+    public static boolean isAutoAcceptTpaHere() {
+        return config != null && config.autoAcceptTpaHere;
+    }
 
     public static void setAutoAcceptTpa(boolean v) {
-        autoAcceptTpa = v;
-        if (!v && !autoAcceptTpaHere) pendingAutoAccept = false;
+        if (config != null) {
+            config.autoAcceptTpa = v;
+            config.save();
+        }
+        if (!v && !isAutoAcceptTpaHere()) pendingAutoAccept = false;
     }
     public static void setAutoAcceptTpaHere(boolean v) {
-        autoAcceptTpaHere = v;
-        if (!v && !autoAcceptTpa) pendingAutoAccept = false;
+        if (config != null) {
+            config.autoAcceptTpaHere = v;
+            config.save();
+        }
+        if (!v && !isAutoAcceptTpa()) pendingAutoAccept = false;
     }
-    public static boolean toggleAutoAcceptTpa() { autoAcceptTpa = !autoAcceptTpa; return autoAcceptTpa; }
-    public static boolean toggleAutoAcceptTpaHere() { autoAcceptTpaHere = !autoAcceptTpaHere; return autoAcceptTpaHere; }
+    public static boolean toggleAutoAcceptTpa() {
+        boolean now = !isAutoAcceptTpa();
+        setAutoAcceptTpa(now);
+        return now;
+    }
+    public static boolean toggleAutoAcceptTpaHere() {
+        boolean now = !isAutoAcceptTpaHere();
+        setAutoAcceptTpaHere(now);
+        return now;
+    }
 
     public static String getRejectMethod() {
         return config != null && config.rejectMethod != null ? config.rejectMethod : "timeout";
@@ -446,7 +462,7 @@ public class PartyHelperManager {
             lastRequestBringsThemToMe = isTpaType; // TPA brings them to me; TPAHERE does not
             
             boolean allowed = isPlayerAllowed(matchedRequester);
-            boolean shouldAutoAccept = allowed && (isTpaType ? autoAcceptTpa : autoAcceptTpaHere);
+            boolean shouldAutoAccept = allowed && (isTpaType ? isAutoAcceptTpa() : isAutoAcceptTpaHere());
             PartyHelperConfig.LOGGER.info("[PartyHelper] TP request ({}) from '{}' | allowed={} | autoAccept={} | party={} | scraped={}",
                 isTpaType ? "tpa" : "tpahere", matchedRequester, allowed,
                 shouldAutoAccept, config != null ? config.activePartyName : "null", scrapedParty);

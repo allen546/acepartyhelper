@@ -35,6 +35,10 @@ public class PartyHelperConfig {
     public boolean logAutoAccept = true;
     /** Automatically prefix plain chat messages with /pc and support /global. Default true. */
     public boolean forcePartyChat = true;
+    /** Auto-accept TPA requests. Default false. */
+    public boolean autoAcceptTpa = false;
+    /** Auto-accept TPAHERE requests. Default false. */
+    public boolean autoAcceptTpaHere = false;
 
     private static File getConfigFile() {
         if (configFile == null) {
