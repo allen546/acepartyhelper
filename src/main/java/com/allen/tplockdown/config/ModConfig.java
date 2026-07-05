@@ -62,7 +62,7 @@ public class ModConfig {
             } catch (Exception re) {
                 System.err.println("[TpLockdown] Failed to rename corrupted config file: " + re.getMessage());
             }
-            return new ModConfig();
+            return load();
         }
     }
 
