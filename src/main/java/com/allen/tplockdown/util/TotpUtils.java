@@ -64,7 +64,6 @@ public class TotpUtils {
         int count = 0;
         for (int i = 0; i < len; i++) {
             int val = allowedChars.indexOf(base32.charAt(i));
-            if (val == -1) continue;
             buffer = (buffer << 5) | val;
             bitsLeft += 5;
             if (bitsLeft >= 8) {

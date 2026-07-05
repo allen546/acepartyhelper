@@ -3,15 +3,20 @@ package com.allen.tplockdown.config;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.ArrayList;
 import java.util.List;
 
 public class ModConfig {
+    public static final Logger LOGGER = LoggerFactory.getLogger("TpLockdown");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static File configFile;
 
@@ -39,7 +44,7 @@ public class ModConfig {
             config.save();
             return config;
         }
-        try (FileReader reader = new FileReader(file)) {
+        try (FileReader reader = new FileReader(file, StandardCharsets.UTF_8)) {
             ModConfig config = GSON.fromJson(reader, ModConfig.class);
             if (config == null) {
                 config = new ModConfig();
@@ -50,19 +55,31 @@ public class ModConfig {
             if (config.manualParty == null) {
                 config.manualParty = new HashSet<>();
             }
+            if (config.partyChatPattern == null) {
+                config.partyChatPattern = "^\\[队内\\]\\s*(?<player>\\w+)";
+            }
             return config;
         } catch (Exception e) {
-            System.err.println("[TpLockdown] Failed to load config, renaming corrupted file: " + e.getMessage());
+            LOGGER.error("[TpLockdown] Failed to load config, renaming corrupted file", e);
             try {
                 File brokenFile = new File(file.getParentFile(), "tplockdown.json.broken");
                 if (brokenFile.exists()) {
                     brokenFile.delete();
                 }
-                file.renameTo(brokenFile);
+                if (!file.renameTo(brokenFile)) {
+                    file.delete();
+                }
             } catch (Exception re) {
-                System.err.println("[TpLockdown] Failed to rename corrupted config file: " + re.getMessage());
+                LOGGER.error("[TpLockdown] Failed to rename or delete corrupted config file", re);
             }
-            return load();
+            ModConfig defaultConfig = new ModConfig();
+            defaultConfig.incomingRequestPatterns.add("(?<player>\\w+)\\s+wants to teleport to you");
+            defaultConfig.incomingRequestPatterns.add("(?<player>\\w+)\\s+has requested to teleport to you");
+            defaultConfig.incomingRequestPatterns.add("(?<player>\\w+)\\s+wants you to teleport to them");
+            defaultConfig.incomingRequestPatterns.add("(?<player>\\w+)\\s+has requested that you teleport to them");
+            defaultConfig.incomingRequestPatterns.add("(?<player>\\w+)\\s+wants to tp to you");
+            defaultConfig.save();
+            return defaultConfig;
         }
     }
 
@@ -72,10 +89,10 @@ public class ModConfig {
         if (parent != null) {
             parent.mkdirs();
         }
-        try (FileWriter writer = new FileWriter(file)) {
+        try (FileWriter writer = new FileWriter(file, StandardCharsets.UTF_8)) {
             GSON.toJson(this, writer);
         } catch (Exception e) {
-            System.err.println("[TpLockdown] Failed to save config: " + e.getMessage());
+            LOGGER.error("[TpLockdown] Failed to save config", e);
         }
     }
 }
