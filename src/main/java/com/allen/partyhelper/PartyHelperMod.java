@@ -79,7 +79,7 @@ public class PartyHelperMod implements ClientModInitializer {
                             "§e/ph unlock <signature> §7— signature bypass unlock (30s)\n" +
                             "§e/ph party-refresh §7— manually query and refresh party\n" +
                             "§e/ph autoaccept tpa|tpahere on|off|toggle\n" +
-                            "§e/ph settings <option> set <value> §7— configure options (reject-method, block-when-no-party, force-party-chat, log-autoaccept)"
+                            "§e/ph settings <option> set <value> §7— configure options (see /ph status)"
                         ));
                         return 1;
                     })
