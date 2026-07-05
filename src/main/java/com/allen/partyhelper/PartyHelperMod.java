@@ -13,6 +13,8 @@ import net.minecraft.text.Text;
 import java.util.Set;
 
 public class PartyHelperMod implements ClientModInitializer {
+    private static final ThreadLocal<Boolean> processingMessage = ThreadLocal.withInitial(() -> false);
+
     @Override
     public void onInitializeClient() {
         PartyHelperManager.init();
@@ -24,6 +26,7 @@ public class PartyHelperMod implements ClientModInitializer {
 
         // Block outgoing commands and handle /global chat override
         ClientSendMessageEvents.ALLOW_COMMAND.register(command -> {
+            if (processingMessage.get()) return true;
             if (PartyHelperManager.getForcePartyChat()) {
                 String cmdTrim = command.trim();
                 if (cmdTrim.startsWith("global ") || cmdTrim.equals("global")) {
@@ -31,7 +34,12 @@ public class PartyHelperMod implements ClientModInitializer {
                     if (client != null && client.getNetworkHandler() != null) {
                         String message = cmdTrim.length() > 7 ? cmdTrim.substring(7).trim() : "";
                         if (!message.isEmpty()) {
-                            client.getNetworkHandler().sendChatMessage(message);
+                            processingMessage.set(true);
+                            try {
+                                client.getNetworkHandler().sendChatMessage(message);
+                            } finally {
+                                processingMessage.set(false);
+                            }
                         } else {
                             if (client.inGameHud != null && client.inGameHud.getChatHud() != null) {
                                 client.inGameHud.getChatHud().addMessage(
@@ -48,10 +56,16 @@ public class PartyHelperMod implements ClientModInitializer {
 
         // Force routing normal chat messages to party chat (/pc)
         ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
+            if (processingMessage.get()) return true;
             if (PartyHelperManager.getForcePartyChat()) {
                 net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
                 if (client != null && client.getNetworkHandler() != null) {
-                    client.getNetworkHandler().sendChatMessage("/pc " + message);
+                    processingMessage.set(true);
+                    try {
+                        client.getNetworkHandler().sendChatMessage("/pc " + message);
+                    } finally {
+                        processingMessage.set(false);
+                    }
                 }
                 return false; // Suppress original chat message
             }
@@ -84,16 +98,12 @@ public class PartyHelperMod implements ClientModInitializer {
                     .executes(context -> {
                         context.getSource().sendFeedback(Text.literal(
                             "§6§l[PartyHelper] Commands:\n" +
-                            "§e/ph help §7— this message\n" +
-                            "§e/ph status §7— show lock/party/autoaccept status\n" +
-                            "§e/ph unlock <code> §7— TOTP bypass (30s)\n" +
-                            "§e/ph party-refresh §7— re-query /party list\n" +
-                            "§e/ph autoaccept tpa on|off|toggle §7— auto-accept /tpa requests from party\n" +
-                            "§e/ph autoaccept tpahere on|off|toggle §7— auto-accept /tpahere requests from party\n" +
-                            "§e/ph autoaccept status §7— show autoaccept states\n" +
-                            "§e/ph settings reject-method set timeout|reject §7— on blocked TP: do nothing or auto-deny\n" +
-                            "§e/ph settings block-when-no-party set true|false §7— block all TPs when not in a party\n" +
-                            "§e/ph settings log-autoaccept set true|false §7— notify in chat on auto-accept"
+                            "§e/ph help §7— show help menu\n" +
+                            "§e/ph status §7— show lock/party/settings status\n" +
+                            "§e/ph unlock <signature> §7— signature bypass unlock (30s)\n" +
+                            "§e/ph party-refresh §7— manually query and refresh party\n" +
+                            "§e/ph autoaccept tpa|tpahere on|off|toggle\n" +
+                            "§e/ph settings <option> set <value> §7— configure options (reject-method, block-when-no-party, force-party-chat, log-autoaccept)"
                         ));
                         return 1;
                     })
