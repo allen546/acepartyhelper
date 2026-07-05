@@ -400,9 +400,10 @@ public class TpLockManager {
         boolean isTpCmd = baseCmd.equals("tpa") || baseCmd.equals("tpahere");
         boolean isAcceptOrDenyCmd = baseCmd.equals("tpaccept") || baseCmd.equals("tpyes") || baseCmd.equals("tpdeny") || baseCmd.equals("tpno");
         boolean isAutoAcceptToggleCmd = baseCmd.equals("tpatoggle") || baseCmd.equals("tpauto");
-        boolean isTpHereNowCmd = baseCmd.equals("tpaherenow");
+        boolean isTpHereNowCmd = baseCmd.equals("tpaherenow") || baseCmd.equals("tpahereall");
         boolean isBlockOrIgnoreCmd = baseCmd.equals("tpablock") || baseCmd.equals("tpaignore");
         boolean isLeaveCmd = baseCmd.equals("party") && parts.length >= 2 && parts[1].equals("leave");
+        boolean isInviteCmd = baseCmd.equals("party") && parts.length >= 2 && parts[1].equals("invite");
 
         if (isAutoAcceptToggleCmd) {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -426,6 +427,18 @@ public class TpLockManager {
                 if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
                     client.inGameHud.getChatHud().addMessage(
                         Text.literal("§c[TP-Lock] Leaving parties is not allowed unless unlocked!")
+                    );
+                }
+                return true;
+            }
+        } else if (isInviteCmd) {
+            if (!isBypassActive()) {
+                String targetPlayer = parts.length >= 3 ? parts[2] : null;
+                String who = targetPlayer != null ? " §f" + targetPlayer : "";
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
+                    client.inGameHud.getChatHud().addMessage(
+                        Text.literal("§c[TP-Lock] Inviting players to party is disabled to prevent unauthorized TPs!" + who)
                     );
                 }
                 return true;
