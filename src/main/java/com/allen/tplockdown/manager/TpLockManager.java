@@ -171,10 +171,11 @@ public class TpLockManager {
     }
 
     public static void onJoinWorld() {
-        scrapedParty.clear();
         latestRequestBlocked = false;
-        setActivePartyName(null);
-
+        pendingAutoAccept = false;
+        // Do NOT clear activePartyName or scrapedParty — they are persisted.
+        // Just trigger a delayed refresh to re-sync with the server.
+        ModConfig.LOGGER.info("[TpLockdown] World joined — scheduling party refresh in 5s");
         Thread t = new Thread(() -> {
             try {
                 Thread.sleep(5000);
@@ -197,13 +198,14 @@ public class TpLockManager {
 
     private static synchronized void triggerAutoQueryActive() {
         autoPartyQueryActive = true;
-        // Safety timeout to prevent locking chat filter indefinitely
+        ModConfig.LOGGER.info("[TpLockdown] autoPartyQueryActive = true, timeout in 15s");
         Thread t = new Thread(() -> {
             try {
-                Thread.sleep(5000);
+                Thread.sleep(15000);
             } catch (InterruptedException e) {
                 // Ignore
             }
+            ModConfig.LOGGER.info("[TpLockdown] autoPartyQueryActive safety timeout fired — resetting to false");
             autoPartyQueryActive = false;
         }, "TpLockdown-AutoQueryTimeout");
         t.setDaemon(true);
@@ -364,7 +366,10 @@ public class TpLockManager {
                     }
                     if (requester != null && !requester.trim().isEmpty()) {
                         latestRequester = requester.trim();
-                        if (!isPlayerAllowed(requester)) {
+                        boolean allowed = isPlayerAllowed(requester);
+                        ModConfig.LOGGER.info("[TpLockdown] TP request from '{}' | allowed={} | autoAccept={} | party={} | scraped={}",
+                            requester, allowed, autoAcceptEnabled, config != null ? config.activePartyName : "null", scrapedParty);
+                        if (!allowed) {
                             latestRequestBlocked = true;
                             pendingAutoAccept = false;
                             MinecraftClient client = MinecraftClient.getInstance();
@@ -379,6 +384,7 @@ public class TpLockManager {
                             // Party member — queue auto-accept if enabled
                             if (autoAcceptEnabled) {
                                 pendingAutoAccept = true;
+                                ModConfig.LOGGER.info("[TpLockdown] Queued auto-accept for '{}'", requester);
                             }
                         }
                     }
@@ -404,6 +410,7 @@ public class TpLockManager {
                 // Auto-accept: send the accept command now
                 final String cmd = pendingAutoAcceptCmd;
                 pendingAutoAccept = false;
+                ModConfig.LOGGER.info("[TpLockdown] Auto-accepting TP with command '/{}'" , cmd);
                 MinecraftClient client = MinecraftClient.getInstance();
                 if (client != null) {
                     client.execute(() -> {
@@ -481,11 +488,11 @@ public class TpLockManager {
         } else if (isInviteCmd) {
             if (!isBypassActive()) {
                 String targetPlayer = parts.length >= 3 ? parts[2] : null;
-                String who = targetPlayer != null ? " §f" + targetPlayer : "";
+                String who = targetPlayer != null ? "§f" + targetPlayer + "§c " : "players ";
                 MinecraftClient client = MinecraftClient.getInstance();
                 if (client != null && client.inGameHud != null && client.inGameHud.getChatHud() != null) {
                     client.inGameHud.getChatHud().addMessage(
-                        Text.literal("§c[TP-Lock] Inviting players to party is disabled to prevent unauthorized TPs!" + who)
+                        Text.literal("§c[TP-Lock] Inviting " + who + "to party is disabled to prevent unauthorized TPs!")
                     );
                 }
                 return true;
