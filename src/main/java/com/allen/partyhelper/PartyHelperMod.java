@@ -13,7 +13,7 @@ import net.minecraft.text.Text;
 import java.util.Set;
 
 public class PartyHelperMod implements ClientModInitializer {
-    private static final ThreadLocal<Boolean> processingMessage = ThreadLocal.withInitial(() -> false);
+    public static final ThreadLocal<Boolean> processingMessage = ThreadLocal.withInitial(() -> false);
 
     @Override
     public void onInitializeClient() {
@@ -30,27 +30,7 @@ public class PartyHelperMod implements ClientModInitializer {
             return !PartyHelperManager.handleOutgoingCommand(command);
         });
 
-        // Force routing normal chat messages to party chat (/pc)
-        ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
-            if (processingMessage.get()) return true;
-            if (PartyHelperManager.getForcePartyChat()) {
-                // Skip prefixing for custom client-side command prefixes (like Baritone '#', client commands '.')
-                if (message.startsWith("#") || message.startsWith(".") || message.startsWith("!")) {
-                    return true;
-                }
-                net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
-                if (client != null && client.getNetworkHandler() != null) {
-                    processingMessage.set(true);
-                    try {
-                        client.getNetworkHandler().sendChatCommand("pc " + message);
-                    } finally {
-                        processingMessage.set(false);
-                    }
-                }
-                return false; // Suppress original chat message
-            }
-            return true;
-        });
+
 
         // Log and filter incoming game (system) messages
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
