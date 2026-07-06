@@ -34,6 +34,10 @@ public class PartyHelperMod implements ClientModInitializer {
         ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
             if (processingMessage.get()) return true;
             if (PartyHelperManager.getForcePartyChat()) {
+                // Skip prefixing for custom client-side command prefixes (like Baritone '#', client commands '.')
+                if (message.startsWith("#") || message.startsWith(".") || message.startsWith("!")) {
+                    return true;
+                }
                 net.minecraft.client.MinecraftClient client = net.minecraft.client.MinecraftClient.getInstance();
                 if (client != null && client.getNetworkHandler() != null) {
                     processingMessage.set(true);
